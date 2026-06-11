@@ -1,23 +1,22 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
-import { db, auth, storage } from '@/lib/firebase';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useAppSettings, useActiveMatch } from '@/lib/store';
+import { useAppSettings, useActiveMatch, localDB, useParticipants } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Camera, CheckCircle2, Trophy, Users, AlertCircle } from 'lucide-react';
-import { Participant, Dynamic } from '@/lib/types';
+import { Camera, CheckCircle2, Trophy, Users, AlertCircle, RefreshCw } from 'lucide-react';
+import { Participant, Dynamic, Vote } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
 export default function PlayPage() {
   const settings = useAppSettings();
+  const participants = useParticipants();
   const { toast } = useToast();
+  
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -27,7 +26,7 @@ export default function PlayPage() {
     generationId: '',
     mode: 'participant' as 'participant' | 'voter',
   });
-  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [votedMatchId, setVotedMatchId] = useState<string | null>(null);
 
@@ -38,70 +37,57 @@ export default function PlayPage() {
   const [activeDynamic, setActiveDynamic] = useState<Dynamic | null>(null);
 
   useEffect(() => {
-    const localUid = typeof window !== 'undefined' ? localStorage.getItem('ideha_registered_uid') : null;
-    
-    const checkRegistration = async (uid: string) => {
-      try {
-        const docRef = doc(db, 'participants', uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setParticipant(docSnap.data() as Participant);
-          onSnapshot(docRef, (snap) => {
-            if (snap.exists()) setParticipant(snap.data() as Participant);
-          });
-        }
-      } catch (err) {
-        console.error("Error verificando registro existente:", err);
+    const localUser = localStorage.getItem('retos_registered_user');
+    if (localUser) {
+      const parsed = JSON.parse(localUser);
+      // Verify if still in the general list (in case it was reset)
+      const exists = participants.find(p => p.id === parsed.id);
+      if (exists) {
+        setParticipant(exists);
+      } else {
+        localStorage.removeItem('retos_registered_user');
       }
-    };
-
-    if (localUid) {
-      checkRegistration(localUid);
     }
-
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        await checkRegistration(u.uid);
-      }
-      setLoading(false);
-    });
-    
-    const timer = setTimeout(() => setLoading(false), 2000);
-    return () => {
-      unsubscribe();
-      clearTimeout(timer);
-    };
-  }, []);
+    setLoading(false);
+  }, [participants]);
 
   useEffect(() => {
-    const fetchMatchData = async () => {
-      if (activeMatch) {
-        try {
-          const dSnap = await getDoc(doc(db, 'dynamics', activeMatch.dynamicId));
-          if (dSnap.exists()) setActiveDynamic({ id: dSnap.id, ...dSnap.data() } as Dynamic);
+    if (activeMatch) {
+      const allDynamicsData = localStorage.getItem('retos_dynamics');
+      const allDynamics: Dynamic[] = allDynamicsData ? JSON.parse(allDynamicsData) : [];
+      const foundDynamic = allDynamics.find(d => d.id === activeMatch.dynamicId);
+      if (foundDynamic) setActiveDynamic(foundDynamic);
 
-          const aSnap = await getDoc(doc(db, 'participants', activeMatch.participantAId));
-          if (aSnap.exists()) setParticipantA({ id: aSnap.id, ...aSnap.data() } as Participant);
-          
-          const bSnap = await getDoc(doc(db, 'participants', activeMatch.participantBId));
-          if (bSnap.exists()) setParticipantB({ id: bSnap.id, ...bSnap.data() } as Participant);
+      const pA = participants.find(p => p.id === activeMatch.participantAId);
+      const pB = participants.find(p => p.id === activeMatch.participantBId);
+      
+      if (pA) setParticipantA(pA);
+      if (pB) setParticipantB(pB);
 
-          if (participant) {
-             if (activeMatch.participantAId === participant.id) {
-               setOpponent(participantB);
-             } else if (activeMatch.participantBId === participant.id) {
-               setOpponent(participantA);
-             }
-          }
-        } catch (err) {
-          console.error("Error cargando datos del duelo:", err);
+      if (participant) {
+        if (activeMatch.participantAId === participant.id) {
+          setOpponent(pB || null);
+        } else if (activeMatch.participantBId === participant.id) {
+          setOpponent(pA || null);
         }
       }
-    };
-    fetchMatchData();
-  }, [activeMatch, participant, participantA, participantB]);
+    }
+  }, [activeMatch, participant, participants]);
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Simple compression: in a real app we'd use canvas, 
+        // but for a prototype this base64 is fine if not too large.
+        setPhotoBase64(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -112,27 +98,8 @@ export default function PlayPage() {
 
     setUploading(true);
     try {
-      let uid = "";
-      try {
-        const userCredential = await signInAnonymously(auth);
-        uid = userCredential.user.uid;
-      } catch (authError: any) {
-        console.error("Error completo al registrarse (Auth): falló signInAnonymously, usando fallback local.", authError);
-        uid = localStorage.getItem('ideha_registered_uid') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      }
-
-      let photoUrl = `https://picsum.photos/seed/${uid}/200`;
-
-      if (photo) {
-        try {
-          const photoRef = ref(storage, `photos/${uid}`);
-          await uploadBytes(photoRef, photo);
-          photoUrl = await getDownloadURL(photoRef);
-        } catch (storageError: any) {
-          console.error("Error completo al registrarse (Storage):", storageError);
-          // Don't block registration if photo upload fails
-        }
-      }
+      const uid = crypto.randomUUID();
+      const photoUrl = photoBase64 || `https://picsum.photos/seed/${uid}/200`;
 
       const pData: Participant = {
         id: uid,
@@ -145,22 +112,32 @@ export default function PlayPage() {
         updatedAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'participants', uid), pData);
+      localDB.saveParticipant(pData);
+      localStorage.setItem('retos_registered_user', JSON.stringify(pData));
       setParticipant(pData);
-      localStorage.setItem('ideha_registered_uid', uid);
-      toast({ title: "¡Registro exitoso!" });
-
+      toast({ title: "¡Registro exitoso localmente!" });
     } catch (err: any) {
-      console.error("Error completo al registrarse:", err);
-      setErrorMessage("No se pudo completar el registro. Revisa la consola o configuración de Firebase.");
+      console.error("Error completo al registrarse localmente:", err);
+      setErrorMessage("No se pudo completar el registro local.");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleVote = async (selectedParticipantId: string) => {
-    toast({ title: "Voto registrado" });
-    setVotedMatchId(activeMatch?.id || null);
+  const handleVote = (selectedParticipantId: string) => {
+    if (!activeMatch || !participant) return;
+    
+    const vote: Vote = {
+      id: crypto.randomUUID(),
+      matchId: activeMatch.id,
+      voterId: participant.id,
+      selectedParticipantId,
+      createdAt: new Date().toISOString()
+    };
+
+    localDB.castVote(vote);
+    setVotedMatchId(activeMatch.id);
+    toast({ title: "Voto registrado localmente" });
   };
 
   if (loading) return <div className="p-10 text-center text-primary font-bold">Cargando perfil...</div>;
@@ -172,6 +149,9 @@ export default function PlayPage() {
           <Users className="w-16 h-16 text-muted-foreground mb-4" />
           <h2 className="text-2xl font-bold">El registro aún no está abierto</h2>
           <p className="text-muted-foreground mt-2">Espera las instrucciones del conductor.</p>
+          <Button variant="ghost" size="sm" className="mt-4 opacity-50" onClick={() => window.location.reload()}>
+            <RefreshCw className="w-3 h-3 mr-2" /> Reintentar
+          </Button>
         </div>
       );
     }
@@ -180,7 +160,7 @@ export default function PlayPage() {
       <div className="p-6 max-w-md mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-headline font-bold text-primary">Regístrate</h1>
-          <p className="text-muted-foreground">Únete a la dinámica IDEHA</p>
+          <p className="text-muted-foreground">Únete a la dinámica IDEHA (Modo Local)</p>
         </div>
 
         {errorMessage && (
@@ -190,7 +170,7 @@ export default function PlayPage() {
           </div>
         )}
 
-        <Card className="border-2 border-primary/20">
+        <Card className="border-2 border-primary/20 shadow-xl">
           <CardContent className="pt-6">
             <form onSubmit={handleRegister} className="space-y-4">
               <div className="space-y-2">
@@ -205,16 +185,16 @@ export default function PlayPage() {
               <div className="space-y-2">
                 <Label>Tu Foto</Label>
                 <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden border-2 border-primary/50">
-                    {photo ? (
-                      <img src={URL.createObjectURL(photo)} className="w-full h-full object-cover" alt="Previsualización" />
+                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden border-2 border-primary/50 shadow-inner">
+                    {photoBase64 ? (
+                      <img src={photoBase64} className="w-full h-full object-cover" alt="Previsualización" />
                     ) : (
                       <Camera className="w-8 h-8 opacity-40" />
                     )}
                   </div>
-                  <Input type="file" accept="image/*" capture="user" className="hidden" id="camera-input" onChange={e => setPhoto(e.target.files?.[0] || null)} />
+                  <Input type="file" accept="image/*" className="hidden" id="camera-input" onChange={handleFileChange} />
                   <Button type="button" variant="outline" onClick={() => document.getElementById('camera-input')?.click()}>
-                    <Camera className="w-4 h-4 mr-2" /> {photo ? 'Cambiar Foto' : 'Tomar Foto'}
+                    <Camera className="w-4 h-4 mr-2" /> {photoBase64 ? 'Cambiar Foto' : 'Tomar Foto'}
                   </Button>
                 </div>
               </div>
@@ -233,8 +213,8 @@ export default function PlayPage() {
                 </RadioGroup>
               </div>
 
-              <Button type="submit" className="w-full h-12 rounded-xl text-lg font-bold" disabled={uploading}>
-                {uploading ? 'Registrando...' : 'Entrar al Evento'}
+              <Button type="submit" className="w-full h-12 rounded-xl text-lg font-bold shadow-lg" disabled={uploading}>
+                {uploading ? 'Entrando...' : 'Entrar al Evento'}
               </Button>
             </form>
           </CardContent>
@@ -245,9 +225,9 @@ export default function PlayPage() {
 
   return (
     <div className="p-4 max-w-md mx-auto space-y-4 pb-20">
-      <Card className="bg-primary/5 border-primary/20">
+      <Card className="bg-primary/5 border-primary/20 shadow-md">
         <CardContent className="p-4 flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary shrink-0">
+          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-primary shrink-0 shadow-sm">
             <img src={participant.photoUrl} className="w-full h-full object-cover" alt={participant.name} />
           </div>
           <div className="overflow-hidden">
@@ -259,12 +239,15 @@ export default function PlayPage() {
                </span>
             </div>
           </div>
+          <Button size="icon" variant="ghost" className="ml-auto" onClick={() => window.location.reload()}>
+            <RefreshCw className="w-4 h-4" />
+          </Button>
         </CardContent>
       </Card>
 
       <div className="mt-4">
         {activeMatch && activeMatch.status === 'live' && participant.status === 'competing' && opponent && activeDynamic && (
-           <Card className="border-secondary border-2 bg-secondary/10 overflow-hidden animate-pulse">
+           <Card className="border-secondary border-2 bg-secondary/10 overflow-hidden animate-pulse shadow-xl">
              <CardHeader className="bg-secondary p-4 text-center">
                <CardTitle className="text-white flex items-center justify-center gap-2">
                  <Trophy className="w-6 h-6" /> ¡TE TOCA COMPETIR!
@@ -273,49 +256,49 @@ export default function PlayPage() {
              <CardContent className="p-6 space-y-4 text-center">
                <div className="flex justify-center gap-4 items-center">
                  <div className="text-center">
-                   <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2">
+                   <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2 shadow-md">
                       <img src={participant.photoUrl} className="w-full h-full object-cover" alt="Tu" />
                    </div>
                    <p className="text-xs font-bold">TÚ</p>
                  </div>
                  <div className="text-2xl font-black italic">VS</div>
                  <div className="text-center">
-                   <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2">
+                   <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2 shadow-md">
                       <img src={opponent.photoUrl} className="w-full h-full object-cover" alt="Oponente" />
                    </div>
                    <p className="text-xs font-bold truncate w-20">{opponent.name}</p>
                  </div>
                </div>
                <div className="pt-4 space-y-2">
-                 <h2 className="text-2xl font-headline font-bold text-primary">{activeDynamic.name}</h2>
-                 <p className="text-sm italic">{activeDynamic.instructions}</p>
+                 <h2 className="text-2xl font-headline font-bold text-primary uppercase tracking-tight">{activeDynamic.name}</h2>
+                 <p className="text-sm italic opacity-90">{activeDynamic.instructions}</p>
                </div>
              </CardContent>
            </Card>
         )}
 
         {activeMatch && activeMatch.status === 'voting' && participantA && participantB && (
-           <Card className="border-primary border-2">
+           <Card className="border-primary border-2 shadow-2xl">
              <CardHeader className="text-center pb-2">
-               <CardTitle className="text-primary font-headline">¿Quién lo hizo mejor?</CardTitle>
+               <CardTitle className="text-primary font-headline uppercase">¿Quién lo hizo mejor?</CardTitle>
                <CardDescription>Vota por el ganador de este duelo</CardDescription>
              </CardHeader>
              <CardContent className="p-6">
                 {votedMatchId === activeMatch.id ? (
-                  <div className="text-center py-10 space-y-4">
+                  <div className="text-center py-10 space-y-4 animate-in fade-in zoom-in">
                     <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
                     <h3 className="text-xl font-bold">¡Voto registrado!</h3>
-                    <p className="opacity-60">Tu decisión ha sido tomada. Espera los resultados.</p>
+                    <p className="opacity-60">Tu decisión ha sido tomada localmente. Espera los resultados.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleVote(participantA.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all">
+                    <button onClick={() => handleVote(participantA.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all hover:scale-105">
                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-white shadow-lg">
                          <img src={participantA.photoUrl} className="w-full h-full object-cover" alt="A" />
                        </div>
                        <p className="font-bold text-center leading-tight h-10 overflow-hidden">{participantA.name}</p>
                     </button>
-                    <button onClick={() => handleVote(participantB.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all">
+                    <button onClick={() => handleVote(participantB.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all hover:scale-105">
                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-white shadow-lg">
                          <img src={participantB.photoUrl} className="w-full h-full object-cover" alt="B" />
                        </div>
@@ -327,7 +310,7 @@ export default function PlayPage() {
            </Card>
         )}
 
-        {(!activeMatch || activeMatch.status === 'pending' || activeMatch.status === 'completed' || participant.status === 'waiting' || participant.status === 'available') && (
+        {(!activeMatch || activeMatch.status === 'pending' || activeMatch.status === 'completed' || (activeMatch.status === 'live' && participant.status !== 'competing') || (activeMatch.status === 'voting' && votedMatchId === activeMatch.id)) && (
            <div className="text-center py-12 space-y-6">
               <div className="relative inline-block">
                 <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full"></div>
