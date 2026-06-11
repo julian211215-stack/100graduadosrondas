@@ -18,16 +18,15 @@ export default function PublicScreen() {
   const participantB = useMemo(() => participants.find(p => p.id === activeMatch?.participantBId), [participants, activeMatch]);
   const activeDynamic = useMemo(() => dynamics.find(d => d.id === activeMatch?.dynamicId), [dynamics, activeMatch]);
 
-  const finalists = useMemo(() => participants.filter(p => p.status === 'finalist'), [participants]);
-
   if (!settings) return <div className="bg-background min-h-screen flex items-center justify-center">Cargando...</div>;
 
   return (
-    <div className="bg-background text-foreground min-h-screen flex flex-col items-center justify-center p-8 md:p-12 overflow-hidden relative scale-[0.92] origin-center">
+    <div className="bg-background text-foreground min-h-screen flex flex-col items-center justify-center p-8 md:p-12 overflow-hidden relative scale-[0.85] origin-top">
       
       {/* Absolute Header Overlay */}
-      <div className="absolute top-8 left-1/2 -translate-x-1/2 z-10 opacity-30">
-        <p className="text-xs font-black tracking-[0.5em] uppercase text-primary">IDEHA MÉXICO • RETOS GRADUADOS</p>
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 opacity-30 flex items-center gap-4">
+        <p className="text-[10px] font-black tracking-[0.5em] uppercase text-primary">IDEHA MÉXICO • RETOS GRADUADOS</p>
+        <span className="text-[8px] font-bold opacity-20">Software By Huki</span>
       </div>
 
       {/* Welcome / Registration Open */}
@@ -77,11 +76,6 @@ export default function PublicScreen() {
                      <img src={p.photoUrl} className="w-full h-full object-cover" alt="" />
                    </div>
                  ))}
-                 {participants.length > 7 && (
-                   <div className="w-14 h-14 rounded-full bg-primary/20 border-2 border-primary/30 flex items-center justify-center font-black text-lg">
-                     +{participants.length - 7}
-                   </div>
-                 )}
               </div>
             </div>
           </div>
@@ -89,8 +83,8 @@ export default function PublicScreen() {
       )}
 
       {/* Duel / Sorting / Live */}
-      {(settings.currentStatus === 'sorting' || settings.currentStatus === 'dueling') && activeMatch && participantA && participantB && activeDynamic && (
-        <div className="w-full max-w-[90vw] h-full flex flex-col justify-between items-center text-center py-6 animate-in slide-in-from-bottom duration-700">
+      {(settings.currentStatus === 'dueling' || (activeMatch && activeMatch.status !== 'completed')) && activeMatch && participantA && participantB && activeDynamic && (
+        <div className="w-full max-w-[95vw] h-full flex flex-col justify-between items-center text-center py-4 animate-in slide-in-from-bottom duration-700">
           <div className="bg-primary px-12 py-3 rounded-full text-black font-black uppercase text-3xl tracking-tighter shadow-[0_0_40px_rgba(212,175,55,0.3)] mb-4">
             DUELO EN VIVO
           </div>
@@ -103,16 +97,15 @@ export default function PublicScreen() {
               </div>
               <div className="max-w-[300px]">
                 <h3 className="text-4xl md:text-5xl font-black font-headline tracking-tighter uppercase drop-shadow-lg truncate">{participantA.name}</h3>
-                <p className="text-xl md:text-2xl opacity-60 uppercase font-bold tracking-[0.3em] mt-1 text-primary">{participantA.generationId}</p>
+                <p className="text-xl md:text-2xl opacity-60 uppercase font-bold tracking-[0.3em] mt-1 text-primary">{participantA.label || participantA.generationId}</p>
               </div>
             </div>
 
             <div className="flex flex-col items-center gap-4 z-10 shrink-0">
-              <div className="text-8xl md:text-[10rem] font-black italic opacity-10 leading-none select-none select-none">VS</div>
+              <div className="text-8xl md:text-[10rem] font-black italic opacity-10 leading-none select-none">VS</div>
               {activeMatch.status === 'voting' && (
                 <div className="bg-secondary px-8 py-5 rounded-[2rem] text-white font-black text-3xl animate-pulse shadow-[0_0_50px_rgba(255,122,0,0.4)] border-4 border-white/20 whitespace-nowrap">
                   VOTACIÓN ABIERTA
-                  <div className="text-sm font-bold mt-1 opacity-80 uppercase tracking-widest">{votes.length} Votos</div>
                 </div>
               )}
             </div>
@@ -124,54 +117,37 @@ export default function PublicScreen() {
               </div>
               <div className="max-w-[300px]">
                 <h3 className="text-4xl md:text-5xl font-black font-headline tracking-tighter uppercase drop-shadow-lg truncate">{participantB.name}</h3>
-                <p className="text-xl md:text-2xl opacity-60 uppercase font-bold tracking-[0.3em] mt-1 text-primary">{participantB.generationId}</p>
+                <p className="text-xl md:text-2xl opacity-60 uppercase font-bold tracking-[0.3em] mt-1 text-primary">{participantB.label || participantB.generationId}</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-card/60 backdrop-blur-sm w-full p-10 rounded-[3rem] border-4 border-primary/20 space-y-4 shadow-2xl mt-4">
+          <div className="bg-card/60 backdrop-blur-sm w-full p-8 rounded-[3rem] border-4 border-primary/20 space-y-4 shadow-2xl mt-4">
             <h2 className="text-5xl md:text-6xl font-black font-headline text-primary tracking-tighter uppercase mb-2">{activeDynamic.name}</h2>
             <p className="text-2xl md:text-3xl font-medium max-w-4xl mx-auto leading-tight opacity-90">{activeDynamic.instructions}</p>
-            {activeDynamic.durationSeconds && (
-              <div className="inline-block mt-4 bg-primary text-black px-8 py-2 rounded-full font-black text-2xl shadow-lg">
-                {activeDynamic.durationSeconds} SEGUNDOS
-              </div>
-            )}
           </div>
         </div>
       )}
 
-      {/* Finished / Finalists */}
-      {settings.currentStatus === 'finished' && (
-        <div className="text-center space-y-12 animate-in zoom-in duration-1000 max-w-7xl">
-          <div className="space-y-4">
-            <div className="relative inline-block mb-4">
+      {/* Winner / Results */}
+      {(activeMatch?.status === 'completed') && participantA && participantB && (
+        <div className="text-center space-y-8 animate-in zoom-in duration-700 max-w-4xl">
+          <div className="relative inline-block mb-4">
                <div className="absolute inset-0 bg-primary/20 blur-[80px] rounded-full animate-pulse"></div>
-               <Trophy className="w-32 h-32 text-primary mx-auto animate-bounce relative drop-shadow-[0_0_30px_rgba(212,175,55,0.8)]" />
-            </div>
-            <h1 className="text-7xl md:text-8xl font-black font-headline text-primary uppercase tracking-tighter drop-shadow-2xl">¡Tenemos Finalistas!</h1>
+               <Trophy className="w-40 h-40 text-primary mx-auto animate-bounce relative" />
           </div>
+          <h1 className="text-6xl md:text-8xl font-black font-headline text-primary uppercase tracking-tighter">
+            {activeMatch.winnerId === participantA.id ? participantA.name : participantB.name}
+          </h1>
+          <p className="text-3xl font-bold tracking-[0.4em] uppercase opacity-60">¡VENCEDOR DE LA RONDA!</p>
           
-          <div className="flex flex-wrap justify-center gap-8 md:gap-16">
-            {finalists.map((f, idx) => (
-              <div key={f.id} className="flex flex-col items-center space-y-6 animate-in slide-in-from-bottom duration-1000" style={{ animationDelay: `${idx * 200}ms` }}>
-                <div className="w-56 h-56 md:w-64 md:h-64 rounded-full border-[8px] border-primary overflow-hidden shadow-[0_0_60px_rgba(212,175,55,0.4)]">
-                   <img src={f.photoUrl} className="w-full h-full object-cover" alt="" />
-                </div>
-                <div>
-                   <h3 className="text-4xl font-black uppercase tracking-tighter">{f.name}</h3>
-                   <p className="text-xl opacity-60 font-bold tracking-[0.2em] uppercase mt-1 text-primary">{f.generationId}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="text-2xl font-medium tracking-[0.4em] opacity-40 italic uppercase pt-6 animate-pulse">
-            Preparando la Gran Final...
+          <div className="flex justify-center mt-10">
+             <div className="w-64 h-64 rounded-full border-[12px] border-primary overflow-hidden shadow-[0_0_60px_rgba(212,175,55,0.4)]">
+                <img src={activeMatch.winnerId === participantA.id ? participantA.photoUrl : participantB.photoUrl} className="w-full h-full object-cover" alt="Ganador" />
+             </div>
           </div>
         </div>
       )}
     </div>
   );
 }
-

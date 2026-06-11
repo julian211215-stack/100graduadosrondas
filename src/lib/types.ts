@@ -9,6 +9,7 @@ export interface Participant {
   photoUrl: string;
   mode: ParticipantMode;
   status: ParticipantStatus;
+  label?: string; // Etiqueta manual (R1, R2, Activo, etc.)
   currentMatchId?: string;
   createdAt: string;
   updatedAt: string;

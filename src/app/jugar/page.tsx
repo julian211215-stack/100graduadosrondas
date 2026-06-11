@@ -128,7 +128,7 @@ export default function PlayPage() {
         const userCred = await signInAnonymously(auth);
         uid = userCred.user.uid;
       } catch (authError) {
-        console.warn("Auth failed, using local UUID for registration:", authError);
+        console.warn("Auth fallback used");
       }
 
       const photoToSave = photoBase64 || `https://picsum.photos/seed/${uid}/200`;
@@ -140,6 +140,7 @@ export default function PlayPage() {
         photoUrl: photoToSave,
         mode: regData.mode,
         status: regData.mode === 'participant' ? 'available' : 'waiting',
+        label: 'Registrado',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -149,8 +150,7 @@ export default function PlayPage() {
       setParticipant(pData);
       toast({ title: "¡Registro exitoso!" });
     } catch (err: any) {
-      console.error("Error completo al guardar registro:", err);
-      setErrorMessage(`Error: ${err.message || 'Error desconocido'}. Revisa la consola.`);
+      setErrorMessage(`Error: ${err.message || 'Error desconocido'}`);
     } finally {
       setUploading(false);
     }
@@ -183,11 +183,8 @@ export default function PlayPage() {
       return (
         <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center">
           <Users className="w-16 h-16 text-muted-foreground mb-4" />
-          <h2 className="text-2xl font-bold">El registro aún no está abierto</h2>
-          <p className="text-muted-foreground mt-2">Espera las instrucciones del conductor.</p>
-          <Button variant="ghost" size="sm" className="mt-4 opacity-50" onClick={() => window.location.reload()}>
-            <RefreshCw className="w-3 h-3 mr-2" /> Reintentar
-          </Button>
+          <h2 className="text-2xl font-bold uppercase tracking-tighter">Registro cerrado</h2>
+          <p className="text-muted-foreground mt-2">Espera instrucciones del conductor.</p>
         </div>
       );
     }
@@ -195,16 +192,9 @@ export default function PlayPage() {
     return (
       <div className="p-6 max-w-md mx-auto space-y-6">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-headline font-bold text-primary">Regístrate</h1>
-          <p className="text-muted-foreground">Únete a la dinámica IDEHA México</p>
+          <h1 className="text-3xl font-headline font-bold text-primary uppercase">Regístrate</h1>
+          <p className="text-muted-foreground">Únete al evento IDEHA México</p>
         </div>
-
-        {errorMessage && (
-          <div className="bg-destructive/10 border border-destructive p-4 rounded-xl text-destructive text-sm font-medium flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <p>{errorMessage}</p>
-          </div>
-        )}
 
         <Card className="border-2 border-primary/20 shadow-xl">
           <CardContent className="pt-6">
@@ -214,14 +204,14 @@ export default function PlayPage() {
                 <Input value={regData.name} onChange={e => setRegData({...regData, name: e.target.value})} placeholder="Ej. Juan Pérez" />
               </div>
               <div className="space-y-2">
-                <Label>Generación o ID</Label>
+                <Label>Generación</Label>
                 <Input value={regData.generationId} onChange={e => setRegData({...regData, generationId: e.target.value})} placeholder="Ej. G120" />
               </div>
               
               <div className="space-y-2">
                 <Label>Tu Foto</Label>
                 <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden border-2 border-primary/50 shadow-inner">
+                  <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center overflow-hidden border-2 border-primary/50">
                     {photoBase64 ? (
                       <img src={photoBase64} className="w-full h-full object-cover" alt="Previsualización" />
                     ) : (
@@ -230,7 +220,7 @@ export default function PlayPage() {
                   </div>
                   <Input type="file" accept="image/*" className="hidden" id="camera-input" onChange={handleFileChange} />
                   <Button type="button" variant="outline" onClick={() => document.getElementById('camera-input')?.click()} disabled={uploading}>
-                    <Camera className="w-4 h-4 mr-2" /> {photoBase64 ? 'Cambiar Foto' : 'Tomar Foto'}
+                    <Camera className="w-4 h-4 mr-2" /> Capturar
                   </Button>
                 </div>
               </div>
@@ -238,18 +228,18 @@ export default function PlayPage() {
               <div className="space-y-2">
                 <Label>Modalidad</Label>
                 <RadioGroup value={regData.mode} onValueChange={(v: any) => setRegData({...regData, mode: v})} className="grid grid-cols-1 gap-2">
-                  <div className="flex items-center space-x-2 border p-3 rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center space-x-2 border p-3 rounded-lg cursor-pointer">
                     <RadioGroupItem value="participant" id="mode-p" />
-                    <Label htmlFor="mode-p" className="cursor-pointer">Quiero participar y votar</Label>
+                    <Label htmlFor="mode-p" className="cursor-pointer">Participar y votar</Label>
                   </div>
-                  <div className="flex items-center space-x-2 border p-3 rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center space-x-2 border p-3 rounded-lg cursor-pointer">
                     <RadioGroupItem value="voter" id="mode-v" />
-                    <Label htmlFor="mode-v" className="cursor-pointer">Solo quiero votar</Label>
+                    <Label htmlFor="mode-v" className="cursor-pointer">Solo votar</Label>
                   </div>
                 </RadioGroup>
               </div>
 
-              <Button type="submit" className="w-full h-12 rounded-xl text-lg font-bold shadow-lg" disabled={uploading}>
+              <Button type="submit" className="w-full h-12 rounded-xl text-lg font-bold" disabled={uploading}>
                 {uploading ? 'Registrando...' : 'Entrar al Evento'}
               </Button>
             </form>
@@ -267,12 +257,12 @@ export default function PlayPage() {
             <img src={participant.photoUrl} className="w-full h-full object-cover" alt={participant.name} />
           </div>
           <div className="overflow-hidden">
-            <h3 className="font-bold text-lg leading-tight truncate">{participant.name}</h3>
-            <p className="text-xs opacity-60">Gen: {participant.generationId} • {participant.mode === 'participant' ? 'Competidor' : 'Espectador'}</p>
-            <div className="mt-1">
-               <span className="text-[10px] uppercase font-black bg-primary/20 text-primary px-2 py-0.5 rounded">
-                 {participant.status === 'eliminated' ? 'Eliminado' : participant.status === 'finalist' ? 'Finalista' : participant.status === 'advanced' ? 'Avanzado' : 'Activo'}
-               </span>
+            <h3 className="font-bold text-lg leading-tight truncate uppercase">{participant.name}</h3>
+            <p className="text-xs opacity-60">Gen: {participant.generationId} • {participant.mode === 'participant' ? 'Competidor' : 'Votante'}</p>
+            <div className="mt-1 flex gap-2">
+               <Badge className="text-[9px] uppercase font-black bg-primary/20 text-primary border-none">
+                 {participant.label || participant.status}
+               </Badge>
             </div>
           </div>
           <Button size="icon" variant="ghost" className="ml-auto" onClick={() => window.location.reload()}>
@@ -282,11 +272,11 @@ export default function PlayPage() {
       </Card>
 
       <div className="mt-4">
-        {activeMatch && activeMatch.status === 'live' && participant.status === 'competing' && opponent && (
+        {activeMatch && activeMatch.status === 'live' && (participant.id === activeMatch.participantAId || participant.id === activeMatch.participantBId) && opponent && (
            <Card className="border-secondary border-2 bg-secondary/10 overflow-hidden animate-pulse shadow-xl">
              <CardHeader className="bg-secondary p-4 text-center">
                <CardTitle className="text-white flex items-center justify-center gap-2">
-                 <Trophy className="w-6 h-6" /> ¡TE TOCA COMPETIR!
+                 <Trophy className="w-6 h-6" /> ¡TU TURNO!
                </CardTitle>
              </CardHeader>
              <CardContent className="p-6 space-y-4 text-center">
@@ -295,14 +285,14 @@ export default function PlayPage() {
                    <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2 shadow-md">
                       <img src={participant.photoUrl} className="w-full h-full object-cover" alt="Tu" />
                    </div>
-                   <p className="text-xs font-bold">TÚ</p>
+                   <p className="text-xs font-bold uppercase">TÚ</p>
                  </div>
                  <div className="text-2xl font-black italic">VS</div>
                  <div className="text-center">
                    <div className="w-20 h-20 rounded-full border-4 border-white overflow-hidden mx-auto mb-2 shadow-md">
                       <img src={opponent.photoUrl} className="w-full h-full object-cover" alt="Oponente" />
                    </div>
-                   <p className="text-xs font-bold truncate w-20">{opponent.name}</p>
+                   <p className="text-xs font-bold truncate w-20 uppercase">{opponent.name}</p>
                  </div>
                </div>
              </CardContent>
@@ -313,28 +303,27 @@ export default function PlayPage() {
            <Card className="border-primary border-2 shadow-2xl">
              <CardHeader className="text-center pb-2">
                <CardTitle className="text-primary font-headline uppercase">¿Quién lo hizo mejor?</CardTitle>
-               <CardDescription>Vota por el ganador de este duelo</CardDescription>
              </CardHeader>
              <CardContent className="p-6">
                 {votedMatchId === activeMatch.id ? (
                   <div className="text-center py-10 space-y-4 animate-in fade-in zoom-in">
                     <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
-                    <h3 className="text-xl font-bold">¡Voto registrado!</h3>
-                    <p className="opacity-60">Tu decisión ha sido enviada. Espera los resultados.</p>
+                    <h3 className="text-xl font-bold uppercase">¡Voto registrado!</h3>
+                    <p className="opacity-60 text-sm">Tu decisión ha sido enviada.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleVote(participantA.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all hover:scale-105">
+                    <button onClick={() => handleVote(participantA.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all">
                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-white shadow-lg">
                          <img src={participantA.photoUrl} className="w-full h-full object-cover" alt="A" />
                        </div>
-                       <p className="font-bold text-center leading-tight h-10 overflow-hidden">{participantA.name}</p>
+                       <p className="font-bold text-center leading-tight uppercase text-xs">{participantA.name}</p>
                     </button>
-                    <button onClick={() => handleVote(participantB.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all hover:scale-105">
+                    <button onClick={() => handleVote(participantB.id)} className="flex flex-col items-center gap-3 p-4 rounded-2xl border-2 border-transparent hover:border-primary bg-muted/30 transition-all">
                        <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-white shadow-lg">
                          <img src={participantB.photoUrl} className="w-full h-full object-cover" alt="B" />
                        </div>
-                       <p className="font-bold text-center leading-tight h-10 overflow-hidden">{participantB.name}</p>
+                       <p className="font-bold text-center leading-tight uppercase text-xs">{participantB.name}</p>
                     </button>
                   </div>
                 )}
@@ -342,27 +331,22 @@ export default function PlayPage() {
            </Card>
         )}
 
-        {(!activeMatch || activeMatch.status === 'pending' || activeMatch.status === 'completed' || (activeMatch.status === 'live' && participant.status !== 'competing') || (activeMatch.status === 'voting' && votedMatchId === activeMatch.id)) && (
+        {(!activeMatch || activeMatch.status === 'pending' || activeMatch.status === 'completed' || (activeMatch.status === 'live' && participant.id !== activeMatch.participantAId && participant.id !== activeMatch.participantBId) || (activeMatch.status === 'voting' && votedMatchId === activeMatch.id)) && (
            <div className="text-center py-12 space-y-6">
-              <div className="relative inline-block">
-                <div className="absolute inset-0 bg-primary/20 blur-2xl rounded-full"></div>
-                <Users className="w-20 h-20 text-primary relative" />
-              </div>
+              <Users className="w-16 h-16 text-primary mx-auto opacity-30" />
               <div className="space-y-2">
-                <h2 className="text-2xl font-bold">
-                  {participant.status === 'eliminated' ? 'Sigues votando' : 
-                   participant.status === 'finalist' ? '¡Eres finalista!' :
-                   participant.status === 'advanced' ? '¡Avanzaste!' :
-                   'Estás registrado'}
+                <h2 className="text-2xl font-black uppercase tracking-tighter">
+                  {participant.label || 'Estás registrado'}
                 </h2>
-                <p className="text-muted-foreground">
-                  {participant.status === 'eliminated' ? 'Tu participación terminó, pero tu voto sigue contando.' :
-                   participant.status === 'finalist' ? 'Prepárate para la gran final.' :
-                   'Espera las instrucciones del conductor para el siguiente duelo.'}
+                <p className="text-muted-foreground text-sm uppercase tracking-widest">
+                  Espera instrucciones del conductor.
                 </p>
               </div>
            </div>
         )}
+      </div>
+      <div className="text-[8px] uppercase font-bold opacity-10 text-center mt-8">
+        Software By Huki
       </div>
     </div>
   );
