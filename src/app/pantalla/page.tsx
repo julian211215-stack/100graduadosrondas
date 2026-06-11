@@ -1,10 +1,10 @@
-
 "use client";
 
 import { useAppSettings, useParticipants, useActiveMatch, useVotes, useDynamics } from '@/lib/store';
-import { Trophy, Users, QrCode, RefreshCw } from 'lucide-react';
+import { Trophy, Users, RefreshCw } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function PublicScreen() {
   const settings = useAppSettings();
@@ -46,9 +46,14 @@ export default function PublicScreen() {
           <div className="flex justify-center items-center gap-16 mt-12 bg-card p-12 rounded-[3rem] border-4 border-primary shadow-[0_0_50px_rgba(212,175,55,0.2)]">
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-3xl inline-block shadow-lg">
-                <QrCode className="w-48 h-48 text-black" />
+                <QRCodeSVG 
+                  value="https://100graduados.vercel.app/jugar" 
+                  size={192} 
+                  level="H" 
+                  marginSize={0}
+                />
               </div>
-              <p className="text-2xl font-bold uppercase tracking-widest text-primary">Escanea para Entrar</p>
+              <p className="text-2xl font-bold uppercase tracking-widest text-primary">Escanea para Registrarte</p>
             </div>
             <div className="text-left space-y-8">
               <div className="flex items-center gap-6">
