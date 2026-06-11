@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Camera, CheckCircle2, Trophy, Users, AlertCircle, RefreshCw } from 'lucide-react';
-import { Participant, Dynamic, Vote } from '@/lib/types';
+import { Participant, Vote } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { auth } from '@/lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
@@ -40,7 +41,6 @@ export default function PlayPage() {
     const localUser = localStorage.getItem('retos_registered_user');
     if (localUser) {
       const parsed = JSON.parse(localUser);
-      // Verify in cloud list
       const exists = participants.find(p => p.id === parsed.id);
       if (exists) {
         setParticipant(exists);
@@ -67,12 +67,46 @@ export default function PlayPage() {
     }
   }, [activeMatch, participant, participants]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 300;
+        const MAX_HEIGHT = 300;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = () => resolve(base64Str);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoBase64(reader.result as string);
+      reader.onloadend = async () => {
+        const result = reader.result as string;
+        const compressed = await compressImage(result);
+        setPhotoBase64(compressed);
       };
       reader.readAsDataURL(file);
     }
@@ -97,13 +131,13 @@ export default function PlayPage() {
         console.warn("Auth failed, using local UUID for registration:", authError);
       }
 
-      const photoUrl = photoBase64 || `https://picsum.photos/seed/${uid}/200`;
+      const photoToSave = photoBase64 || `https://picsum.photos/seed/${uid}/200`;
 
       const pData: Participant = {
         id: uid,
-        name: regData.name,
-        generationId: regData.generationId,
-        photoUrl,
+        name: regData.name.trim(),
+        generationId: regData.generationId.trim(),
+        photoUrl: photoToSave,
         mode: regData.mode,
         status: regData.mode === 'participant' ? 'available' : 'waiting',
         createdAt: new Date().toISOString(),
@@ -115,8 +149,8 @@ export default function PlayPage() {
       setParticipant(pData);
       toast({ title: "¡Registro exitoso!" });
     } catch (err: any) {
-      console.error("Error al registrarse:", err);
-      setErrorMessage("No se pudo completar el registro. Revisa la consola.");
+      console.error("Error completo al guardar registro:", err);
+      setErrorMessage(`Error: ${err.message || 'Error desconocido'}. Revisa la consola.`);
     } finally {
       setUploading(false);
     }
@@ -162,7 +196,7 @@ export default function PlayPage() {
       <div className="p-6 max-w-md mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-headline font-bold text-primary">Regístrate</h1>
-          <p className="text-muted-foreground">Únete a la dinámica IDEHA</p>
+          <p className="text-muted-foreground">Únete a la dinámica IDEHA México</p>
         </div>
 
         {errorMessage && (
@@ -195,7 +229,7 @@ export default function PlayPage() {
                     )}
                   </div>
                   <Input type="file" accept="image/*" className="hidden" id="camera-input" onChange={handleFileChange} />
-                  <Button type="button" variant="outline" onClick={() => document.getElementById('camera-input')?.click()}>
+                  <Button type="button" variant="outline" onClick={() => document.getElementById('camera-input')?.click()} disabled={uploading}>
                     <Camera className="w-4 h-4 mr-2" /> {photoBase64 ? 'Cambiar Foto' : 'Tomar Foto'}
                   </Button>
                 </div>
@@ -216,7 +250,7 @@ export default function PlayPage() {
               </div>
 
               <Button type="submit" className="w-full h-12 rounded-xl text-lg font-bold shadow-lg" disabled={uploading}>
-                {uploading ? 'Entrando...' : 'Entrar al Evento'}
+                {uploading ? 'Registrando...' : 'Entrar al Evento'}
               </Button>
             </form>
           </CardContent>
