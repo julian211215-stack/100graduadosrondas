@@ -36,7 +36,6 @@ export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    // Single source of truth in Firestore
     const docRef = doc(db, 'settings', 'main');
     const unsub = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -76,7 +75,6 @@ export function useDynamics() {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        // Filter out documents without name or instructions to handle contamination
         .filter(d => d.name && d.instructions)
         .map(d => ({
           id: d.id,
@@ -89,7 +87,6 @@ export function useDynamics() {
           updatedAt: d.updatedAt || new Date().toISOString(),
         } as Dynamic));
       
-      // Client-side sort to avoid index requirements
       setDynamics(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
     }, (error) => {
       console.error("Error al cargar dinámicas:", error);
@@ -276,8 +273,6 @@ export const localDB = {
         currentRoundId: "",
         activeMatchId: "",
       });
-      // Not deleting all dynamics or registrations automatically for safety,
-      // but the event state is cleared for all devices.
     } catch (error: any) {
       console.error("Error al reiniciar evento:", error);
       throw error;

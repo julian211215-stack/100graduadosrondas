@@ -4,11 +4,13 @@
 import { useAppSettings, useParticipants, useDynamics, useMatches, useVotes, localDB } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trophy, Users, Play, Radio, CheckCircle, ChevronRight, Shuffle, XCircle, RefreshCw } from 'lucide-react';
+import { Trophy, Users, Play, Radio, CheckCircle, ChevronRight, Shuffle, XCircle, RefreshCw, UserPlus, Settings2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Participant, Match } from '@/lib/types';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from '@/components/ui/label';
 
 export default function ConductorPage() {
   const settings = useAppSettings();
@@ -16,16 +18,28 @@ export default function ConductorPage() {
   const dynamics = useDynamics();
   const { toast } = useToast();
 
+  const [manualA, setManualA] = useState<string>("");
+  const [manualB, setManualB] = useState<string>("");
+  const [manualDyn, setManualDyn] = useState<string>("");
+
   const activeMatchId = settings?.activeMatchId;
   const matches = useMatches(settings?.currentRoundId || undefined);
   const activeMatch = useMemo(() => matches.find(m => m.id === activeMatchId), [matches, activeMatchId]);
   const votes = useVotes(activeMatchId || undefined);
 
+  // Participants eligible to compete: anyone not eliminated
+  const eligibleToCompete = useMemo(() => 
+    participants.filter(p => 
+      p.mode === 'participant' && 
+      (p.status === 'available' || p.status === 'advanced' || p.status === 'waiting' || p.status === 'competing')
+    ), 
+  [participants]);
+
   const stats = {
     total: participants.length,
     competitors: participants.filter(p => p.mode === 'participant').length,
     voters: participants.filter(p => p.mode === 'voter').length,
-    active: participants.filter(p => p.status === 'available' || p.status === 'competing' || p.status === 'advanced').length,
+    active: participants.filter(p => p.status === 'available' || p.status === 'advanced' || p.status === 'waiting' || p.status === 'competing').length,
     eliminated: participants.filter(p => p.status === 'eliminated').length,
     finalists: participants.filter(p => p.status === 'finalist').length,
   };
@@ -35,16 +49,67 @@ export default function ConductorPage() {
     localDB.updateSettings({ registrationOpen: !settings.registrationOpen });
   };
 
+  const handleCreateManualMatch = async () => {
+    if (!manualA || !manualB || !manualDyn) {
+      toast({ title: "Selecciona ambos participantes y la dinámica", variant: "destructive" });
+      return;
+    }
+    if (manualA === manualB) {
+      toast({ title: "No puede competir contra sí mismo", variant: "destructive" });
+      return;
+    }
+
+    const roundId = `manual-${Date.now()}`;
+    const id = crypto.randomUUID();
+    
+    const match: Match = {
+      id,
+      roundId,
+      participantAId: manualA,
+      participantBId: manualB,
+      dynamicId: manualDyn,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      await localDB.createRound({
+        id: roundId,
+        roundNumber: 0,
+        status: 'active',
+        matchIds: [id],
+        createdAt: new Date().toISOString(),
+      }, [match]);
+
+      await localDB.updateSettings({ 
+        currentRoundId: roundId, 
+        activeMatchId: id,
+        currentStatus: 'dueling'
+      });
+
+      setManualA("");
+      setManualB("");
+      setManualDyn("");
+      toast({ title: "Duelo manual creado" });
+    } catch (error) {
+      toast({ title: "Error al crear duelo", variant: "destructive" });
+    }
+  };
+
   const handleSortRound = () => {
     if (dynamics.length === 0) {
       toast({ title: "Agrega dinámicas en ajustes primero", variant: "destructive" });
       return;
     }
     
-    const available = participants.filter(p => (p.status === 'available' || p.status === 'advanced' || p.status === 'waiting' || p.status === 'finalist') && p.mode === 'participant');
+    // Sort logic includes advanced participants (winners from before)
+    const available = participants.filter(p => 
+      (p.status === 'available' || p.status === 'advanced' || p.status === 'waiting') && 
+      p.mode === 'participant'
+    );
     
     if (available.length < 2) {
-      toast({ title: "No hay suficientes participantes para un sorteo", variant: "destructive" });
+      toast({ title: "No hay suficientes participantes disponibles para un sorteo", variant: "destructive" });
       return;
     }
 
@@ -71,20 +136,18 @@ export default function ConductorPage() {
         generatedMatches.push(match);
         matchIds.push(id);
       } else {
-        // The one with "bye" advances automatically
         localDB.saveParticipant({ ...shuffled[i], status: 'advanced' });
       }
     }
 
-    const round = {
+    localDB.createRound({
       id: roundId,
       roundNumber: (settings?.currentRoundId ? 2 : 1),
       status: 'active',
       matchIds,
       createdAt: new Date().toISOString(),
-    };
+    }, generatedMatches);
 
-    localDB.createRound(round, generatedMatches);
     localDB.updateSettings({ 
       currentRoundId: roundId, 
       activeMatchId: matchIds[0],
@@ -126,17 +189,23 @@ export default function ConductorPage() {
     const winner = participants.find(p => p.id === winnerId);
     const loser = participants.find(p => p.id === loserId);
     
+    // Winner advances, can compete again in manual or next round
     if (winner) localDB.saveParticipant({ ...winner, status: 'advanced' });
+    // Loser is eliminated from competing, but stays as voter
     if (loser) localDB.saveParticipant({ ...loser, status: 'eliminated' });
     
-    // Check finalists
-    const remaining = participants.filter(p => (p.status === 'advanced' || p.status === 'available') && p.mode === 'participant' && p.id !== loserId);
-    if (remaining.length <= (settings?.finalistsCount || 2)) {
-      remaining.forEach(r => localDB.saveParticipant({ ...r, status: 'finalist' }));
+    const remainingActive = participants.filter(p => 
+      (p.status === 'advanced' || p.status === 'available' || p.status === 'waiting') && 
+      p.mode === 'participant' && 
+      p.id !== loserId
+    );
+
+    if (remainingActive.length <= (settings?.finalistsCount || 2)) {
+      remainingActive.forEach(r => localDB.saveParticipant({ ...r, status: 'finalist' }));
       localDB.updateSettings({ currentStatus: 'finished' });
     }
 
-    toast({ title: "Ganador confirmado" });
+    toast({ title: "Resultado guardado" });
   };
 
   const handleNextMatch = () => {
@@ -145,13 +214,8 @@ export default function ConductorPage() {
     if (currentIndex < matches.length - 1) {
       localDB.updateSettings({ activeMatchId: matches[currentIndex + 1].id });
     } else {
-      toast({ title: "¡Todos los duelos de esta ronda terminados!" });
+      toast({ title: "¡Ronda completada!" });
     }
-  };
-
-  const handleDeleteParticipant = (id: string) => {
-    if (!confirm("¿Borrar este registro?")) return;
-    localDB.deleteParticipant(id);
   };
 
   const voteCounts = useMemo(() => {
@@ -163,149 +227,218 @@ export default function ConductorPage() {
   }, [votes]);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-8 pb-32">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 pb-32 scale-[0.96] origin-top">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-headline font-black text-primary uppercase tracking-tighter shadow-sm">
+          <h1 className="text-4xl font-headline font-black text-primary uppercase tracking-tighter">
             {settings?.eventName || 'Retos Graduados'}
           </h1>
-          <p className="text-muted-foreground font-medium uppercase text-xs tracking-widest flex items-center gap-2">
-            Panel del Conductor
-            <Button variant="ghost" size="icon" className="h-4 w-4" onClick={() => window.location.reload()}><RefreshCw className="w-3 h-3"/></Button>
+          <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-[0.3em] flex items-center gap-2">
+            Panel del Conductor <Badge variant="outline" className="text-[9px] border-primary/20">V2.0</Badge>
           </p>
         </div>
         <div className="flex gap-2">
-           <Button variant={settings?.registrationOpen ? "destructive" : "default"} onClick={handleToggleRegistration} className="rounded-xl h-12 font-bold px-6 shadow-md">
+           <Button variant={settings?.registrationOpen ? "destructive" : "default"} onClick={handleToggleRegistration} className="rounded-xl h-12 font-bold px-6 shadow-lg transition-all hover:scale-105">
               {settings?.registrationOpen ? <XCircle className="w-5 h-5 mr-2" /> : <CheckCircle className="w-5 h-5 mr-2" />}
               {settings?.registrationOpen ? "Cerrar Registro" : "Abrir Registro"}
            </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         {Object.entries(stats).map(([label, val]) => (
-          <Card key={label} className="bg-muted/30 border-none shadow-sm">
-            <CardContent className="p-4 text-center">
-              <p className="text-[10px] uppercase font-bold opacity-50 tracking-wider">{label}</p>
-              <p className="text-3xl font-black text-primary">{val}</p>
+          <Card key={label} className="bg-muted/20 border-none shadow-sm">
+            <CardContent className="p-3 text-center">
+              <p className="text-[9px] uppercase font-bold opacity-40 tracking-widest">{label}</p>
+              <p className="text-2xl font-black text-primary">{val}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-6">
-          <Card className="border-2 border-primary overflow-hidden shadow-2xl">
-             <CardHeader className="bg-primary p-4 text-black flex flex-row items-center justify-between">
-                <CardTitle className="font-headline font-black uppercase italic tracking-tight">Control de Duelos</CardTitle>
-                <Button variant="ghost" size="icon" onClick={handleSortRound} className="text-black hover:bg-black/10">
-                   <Shuffle className="w-5 h-5" />
-                </Button>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Main Control Area */}
+        <div className="lg:col-span-8 space-y-6">
+          <Card className="border-2 border-primary/50 overflow-hidden shadow-2xl">
+             <CardHeader className="bg-primary/10 border-b border-primary/20 p-4">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="font-headline font-black uppercase text-xl flex items-center gap-2">
+                    <Play className="w-5 h-5 text-primary" /> Control de Duelo
+                  </CardTitle>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={handleSortRound} className="rounded-lg h-9">
+                      <Shuffle className="w-4 h-4 mr-2" /> Sorteo
+                    </Button>
+                  </div>
+                </div>
              </CardHeader>
              <CardContent className="p-6">
                 {!activeMatch ? (
-                   <div className="text-center py-20 space-y-6">
-                      <Shuffle className="w-20 h-20 opacity-10 mx-auto animate-pulse" />
-                      <p className="text-muted-foreground font-medium">No hay una ronda activa en curso.</p>
-                      <Button size="lg" onClick={handleSortRound} className="rounded-xl h-16 px-10 text-xl font-black shadow-lg">
-                        Sortear Nueva Ronda
-                      </Button>
+                   <div className="text-center py-16 space-y-4">
+                      <div className="w-20 h-20 bg-muted/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Trophy className="w-10 h-10 opacity-20" />
+                      </div>
+                      <p className="text-muted-foreground font-medium">No hay duelos activos actualmente.</p>
+                      <div className="flex justify-center gap-3">
+                        <Button size="lg" onClick={handleSortRound} className="rounded-xl h-14 px-8 font-black shadow-lg">
+                          Generar Sorteo
+                        </Button>
+                      </div>
                    </div>
                 ) : (
-                   <div className="space-y-8">
-                      <div className="flex justify-between items-center gap-4">
+                   <div className="space-y-8 animate-in fade-in zoom-in duration-300">
+                      <div className="flex justify-between items-center gap-6">
                          {/* Participant A */}
                          <div className="flex-1 text-center space-y-4">
-                            <div className="w-24 h-24 rounded-full border-4 border-primary overflow-hidden mx-auto shadow-md">
+                            <div className={`w-28 h-28 rounded-full border-4 overflow-hidden mx-auto shadow-xl transition-all ${activeMatch.winnerId === activeMatch.participantAId ? 'border-green-500 scale-110' : 'border-primary'}`}>
                                <img src={participants.find(p => p.id === activeMatch.participantAId)?.photoUrl} className="w-full h-full object-cover" alt="A" />
                             </div>
                             <div>
-                               <h3 className="font-bold text-lg leading-tight">{participants.find(p => p.id === activeMatch.participantAId)?.name}</h3>
-                               <div className="text-3xl font-black text-primary mt-1">{voteCounts[activeMatch.participantAId] || 0}</div>
+                               <h3 className="font-black text-xl leading-tight truncate">{participants.find(p => p.id === activeMatch.participantAId)?.name}</h3>
+                               <div className="text-4xl font-black text-primary mt-1">{voteCounts[activeMatch.participantAId] || 0}</div>
                             </div>
                             {activeMatch.status === 'completed' && !activeMatch.winnerId && (
-                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantAId)}>Ganador</Button>
+                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantAId)} className="w-full font-bold">Marcar Ganador</Button>
                             )}
-                            {activeMatch.winnerId === activeMatch.participantAId && <Badge className="bg-green-500 text-white p-2">¡GANADOR!</Badge>}
+                            {activeMatch.winnerId === activeMatch.participantAId && <Badge className="bg-green-500 text-white animate-bounce">¡VENCEDOR!</Badge>}
                          </div>
 
-                         <div className="flex flex-col items-center gap-4">
-                            <div className="text-4xl font-black italic opacity-20">VS</div>
-                            <Badge variant="outline" className="uppercase font-bold">{activeMatch.status}</Badge>
+                         <div className="flex flex-col items-center gap-2">
+                            <div className="text-5xl font-black italic opacity-10">VS</div>
+                            <Badge variant="secondary" className="uppercase font-black text-[10px] tracking-widest">{activeMatch.status}</Badge>
                          </div>
 
                          {/* Participant B */}
                          <div className="flex-1 text-center space-y-4">
-                            <div className="w-24 h-24 rounded-full border-4 border-primary overflow-hidden mx-auto shadow-md">
+                            <div className={`w-28 h-28 rounded-full border-4 overflow-hidden mx-auto shadow-xl transition-all ${activeMatch.winnerId === activeMatch.participantBId ? 'border-green-500 scale-110' : 'border-primary'}`}>
                                <img src={participants.find(p => p.id === activeMatch.participantBId)?.photoUrl} className="w-full h-full object-cover" alt="B" />
                             </div>
                             <div>
-                               <h3 className="font-bold text-lg leading-tight">{participants.find(p => p.id === activeMatch.participantBId)?.name}</h3>
-                               <div className="text-3xl font-black text-primary mt-1">{voteCounts[activeMatch.participantBId] || 0}</div>
+                               <h3 className="font-black text-xl leading-tight truncate">{participants.find(p => p.id === activeMatch.participantBId)?.name}</h3>
+                               <div className="text-4xl font-black text-primary mt-1">{voteCounts[activeMatch.participantBId] || 0}</div>
                             </div>
                             {activeMatch.status === 'completed' && !activeMatch.winnerId && (
-                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantBId)}>Ganador</Button>
+                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantBId)} className="w-full font-bold">Marcar Ganador</Button>
                             )}
-                            {activeMatch.winnerId === activeMatch.participantBId && <Badge className="bg-green-500 text-white p-2">¡GANADOR!</Badge>}
+                            {activeMatch.winnerId === activeMatch.participantBId && <Badge className="bg-green-500 text-white animate-bounce">¡VENCEDOR!</Badge>}
                          </div>
                       </div>
 
-                      <div className="bg-muted/50 p-6 rounded-2xl text-center shadow-inner border">
-                         <h4 className="font-black text-primary mb-2 text-xl tracking-tight">{dynamics.find(d => d.id === activeMatch.dynamicId)?.name}</h4>
-                         <p className="text-sm opacity-80 italic">{dynamics.find(d => d.id === activeMatch.dynamicId)?.instructions}</p>
+                      <div className="bg-muted/40 p-5 rounded-2xl text-center border-2 border-dashed border-primary/20">
+                         <h4 className="font-black text-primary mb-1 text-lg uppercase">{dynamics.find(d => d.id === activeMatch.dynamicId)?.name}</h4>
+                         <p className="text-xs opacity-70 italic line-clamp-2">{dynamics.find(d => d.id === activeMatch.dynamicId)?.instructions}</p>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                         <Button onClick={handleStartMatch} disabled={activeMatch.status !== 'pending'} className="h-16 text-lg rounded-xl font-bold">
-                            <Play className="w-5 h-5 mr-2" /> Iniciar
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                         <Button onClick={handleStartMatch} disabled={activeMatch.status !== 'pending'} className="h-14 rounded-xl font-bold shadow-md">
+                            <Play className="w-4 h-4 mr-2" /> Iniciar
                          </Button>
-                         <Button onClick={handleOpenVoting} disabled={activeMatch.status !== 'live'} className="h-16 text-lg rounded-xl font-bold">
-                            <Radio className="w-5 h-5 mr-2" /> Votar
+                         <Button onClick={handleOpenVoting} disabled={activeMatch.status !== 'live'} className="h-14 rounded-xl font-bold shadow-md">
+                            <Radio className="w-4 h-4 mr-2" /> Votar
                          </Button>
-                         <Button variant="outline" onClick={handleCloseVoting} disabled={activeMatch.status !== 'voting'} className="h-16 text-lg rounded-xl font-bold">
-                            <CheckCircle className="w-5 h-5 mr-2" /> Cerrar
+                         <Button variant="outline" onClick={handleCloseVoting} disabled={activeMatch.status !== 'voting'} className="h-14 rounded-xl font-bold border-2">
+                            <CheckCircle className="w-4 h-4 mr-2" /> Cerrar
                          </Button>
-                         <Button variant="secondary" onClick={handleNextMatch} disabled={activeMatch.status !== 'completed' || !activeMatch.winnerId} className="h-16 text-lg rounded-xl font-bold">
-                            Siguiente <ChevronRight className="w-5 h-5 ml-2" />
+                         <Button variant="secondary" onClick={handleNextMatch} disabled={activeMatch.status !== 'completed' || !activeMatch.winnerId} className="h-14 rounded-xl font-bold">
+                            Próximo <ChevronRight className="w-4 h-4 ml-2" />
                          </Button>
                       </div>
                    </div>
                 )}
              </CardContent>
           </Card>
+
+          {/* Manual Match Section */}
+          <Card className="bg-muted/10 border-2 border-dashed border-primary/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg font-black uppercase flex items-center gap-2">
+                <Settings2 className="w-5 h-5 text-primary" /> Armar Duelo Manual
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase font-bold opacity-50">Participante A</Label>
+                  <Select value={manualA} onValueChange={setManualA}>
+                    <SelectTrigger className="bg-background rounded-xl">
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {eligibleToCompete.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.status})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase font-bold opacity-50">Participante B</Label>
+                  <Select value={manualB} onValueChange={setManualB}>
+                    <SelectTrigger className="bg-background rounded-xl">
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {eligibleToCompete.map(p => (
+                        <SelectItem key={p.id} value={p.id}>{p.name} ({p.status})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] uppercase font-bold opacity-50">Dinámica</Label>
+                  <Select value={manualDyn} onValueChange={setManualDyn}>
+                    <SelectTrigger className="bg-background rounded-xl">
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dynamics.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <Button onClick={handleCreateManualMatch} className="w-full h-12 rounded-xl font-black bg-primary/20 text-primary border-2 border-primary/20 hover:bg-primary hover:text-black">
+                <UserPlus className="w-5 h-5 mr-2" /> Lanzar Duelo Manual
+              </Button>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="space-y-6">
-           <Card className="shadow-lg border-none">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg font-headline font-bold">Asistentes ({participants.length})</CardTitle>
+        {/* Sidebar */}
+        <div className="lg:col-span-4 space-y-6">
+           <Card className="shadow-xl border-none h-full max-h-[800px] flex flex-col">
+              <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/5">
+                <CardTitle className="text-base font-black uppercase">Participantes ({participants.length})</CardTitle>
                 <Button variant="ghost" size="icon" onClick={() => window.location.reload()}><RefreshCw className="w-4 h-4"/></Button>
               </CardHeader>
-              <CardContent className="p-0 max-h-[600px] overflow-auto">
-                <div className="divide-y border-t">
+              <CardContent className="p-0 overflow-auto flex-1">
+                <div className="divide-y">
                    {participants.map(p => (
-                      <div key={p.id} className="p-4 flex items-center justify-between hover:bg-muted/30 transition-colors">
+                      <div key={p.id} className="p-3 flex items-center justify-between hover:bg-primary/5 transition-colors">
                         <div className="flex items-center gap-3">
-                           <div className="w-12 h-12 rounded-full overflow-hidden border shadow-sm">
+                           <div className={`w-10 h-10 rounded-full overflow-hidden border-2 ${p.status === 'eliminated' ? 'border-destructive/30 grayscale' : 'border-primary/50'}`}>
                               <img src={p.photoUrl} className="w-full h-full object-cover" alt="" />
                            </div>
                            <div className="overflow-hidden">
-                              <p className="font-bold text-sm truncate w-32">{p.name}</p>
-                              <p className="text-[10px] opacity-50 uppercase tracking-wider">{p.generationId} • {p.mode}</p>
+                              <p className="font-black text-xs truncate w-32 uppercase">{p.name}</p>
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className={`text-[8px] px-1 h-4 ${p.status === 'eliminated' ? 'text-destructive' : 'text-primary'}`}>{p.status}</Badge>
+                                <span className="text-[8px] opacity-40 uppercase">{p.mode}</span>
+                              </div>
                            </div>
                         </div>
                         <div className="flex gap-1">
-                           <Button size="icon" variant="ghost" className="h-8 w-8 text-primary" onClick={() => localDB.saveParticipant({ ...p, mode: p.mode === 'participant' ? 'voter' : 'participant' })}>
+                           <Button size="icon" variant="ghost" className="h-7 w-7 text-primary" onClick={() => localDB.saveParticipant({ ...p, mode: p.mode === 'participant' ? 'voter' : 'participant' })}>
                              <Shuffle className="w-3 h-3" />
                            </Button>
-                           <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => handleDeleteParticipant(p.id)}>
+                           <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => localDB.deleteParticipant(p.id)}>
                              <XCircle className="w-3 h-3" />
                            </Button>
                         </div>
                       </div>
                    ))}
                    {participants.length === 0 && (
-                     <div className="p-10 text-center opacity-30 text-sm italic">Nadie registrado aún</div>
+                     <div className="p-10 text-center opacity-30 text-xs italic font-medium">Esperando registros...</div>
                    )}
                 </div>
               </CardContent>
@@ -315,3 +448,4 @@ export default function ConductorPage() {
     </div>
   );
 }
+
