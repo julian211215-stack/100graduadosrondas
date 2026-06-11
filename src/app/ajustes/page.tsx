@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Edit2, Database, RefreshCw, AlertCircle } from 'lucide-react';
+import { Trash2, Edit2, Database, RefreshCw, Sparkles, AlertCircle } from 'lucide-react';
 import { Dynamic } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -24,7 +24,7 @@ export default function SettingsPage() {
     setIsSaving(true);
     try {
       await localDB.updateSettings(settings);
-      toast({ title: "Ajustes guardados" });
+      toast({ title: "Ajustes guardados correctamente" });
     } catch (error: any) {
       toast({ 
         title: "Error al guardar ajustes", 
@@ -49,7 +49,7 @@ export default function SettingsPage() {
         id: isEditing || crypto.randomUUID(),
         name: newDynamic.name,
         instructions: newDynamic.instructions,
-        durationSeconds: newDynamic.durationSeconds || null,
+        durationSeconds: newDynamic.durationSeconds ?? null,
         votingCriteria: newDynamic.votingCriteria || "",
         active: true,
         createdAt: newDynamic.createdAt || new Date().toISOString(),
@@ -59,8 +59,9 @@ export default function SettingsPage() {
       await localDB.saveDynamic(dynamicToSave);
       setIsEditing(null);
       setNewDynamic({});
-      toast({ title: "Dinámica guardada" });
+      toast({ title: "Dinámica guardada correctamente" });
     } catch (error: any) {
+      console.error("Error al guardar dinámica:", error);
       toast({ 
         title: "Error al guardar dinámica", 
         description: error.message, 
@@ -71,8 +72,37 @@ export default function SettingsPage() {
     }
   };
 
+  const handleLoadDemo = async () => {
+    setIsSaving(true);
+    const demos: Partial<Dynamic>[] = [
+      { name: "La actuación más víctima", instructions: "El participante debe actuar como si hubiera perdido algo valiosísimo de forma exagerada.", durationSeconds: 60 },
+      { name: "Canto sin aire", instructions: "Cantar un fragmento de una canción famosa aguantando la respiración lo más posible.", durationSeconds: 45 },
+      { name: "Explicación en 30s", instructions: "Explicar un tema complejo (ej. física cuántica) como si fuera un niño de 5 años.", durationSeconds: 30 }
+    ];
+
+    try {
+      for (const demo of demos) {
+        await localDB.saveDynamic({
+          id: crypto.randomUUID(),
+          name: demo.name!,
+          instructions: demo.instructions!,
+          durationSeconds: demo.durationSeconds!,
+          votingCriteria: "Creatividad y desempeño",
+          active: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        } as Dynamic);
+      }
+      toast({ title: "Dinámicas demo cargadas" });
+    } catch (error: any) {
+      toast({ title: "Error al cargar demo", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleDeleteDynamic = async (id: string) => {
-    if (!confirm("¿Eliminar dinámica?")) return;
+    if (!confirm("¿Eliminar esta dinámica?")) return;
     try {
       await localDB.deleteDynamic(id);
       toast({ title: "Dinámica eliminada" });
@@ -82,7 +112,7 @@ export default function SettingsPage() {
   };
 
   const handleClearEvent = async () => {
-    if (!confirm("¿Seguro que quieres reiniciar el evento?")) return;
+    if (!confirm("¿Seguro que quieres reiniciar el estado del evento?")) return;
     try {
       await localDB.resetAll();
       toast({ title: "Evento reiniciado" });
@@ -93,10 +123,16 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8 pb-20">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento</h1>
-        <div className="flex gap-2">
-          <Button variant="destructive" onClick={handleClearEvent} disabled={isSaving}>
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento</h1>
+          <p className="text-muted-foreground text-sm">Gestiona la configuración y las dinámicas del torneo.</p>
+        </div>
+        <div className="flex gap-2 w-full md:w-auto">
+          <Button variant="outline" onClick={handleLoadDemo} disabled={isSaving} className="flex-1">
+            <Sparkles className="w-4 h-4 mr-2" /> Cargar Demo
+          </Button>
+          <Button variant="destructive" onClick={handleClearEvent} disabled={isSaving} className="flex-1">
             <RefreshCw className="w-4 h-4 mr-2" /> Reiniciar
           </Button>
         </div>
@@ -131,7 +167,9 @@ export default function SettingsPage() {
               </Button>
             </form>
           ) : (
-            <div className="p-4 text-center opacity-50">Cargando ajustes...</div>
+            <div className="p-4 text-center opacity-50 flex items-center justify-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" /> Cargando ajustes...
+            </div>
           )}
         </CardContent>
       </Card>
@@ -152,24 +190,24 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Duración (segundos)</Label>
+              <Label>Duración (segundos, opcional)</Label>
               <Input 
                 type="number"
-                value={newDynamic.durationSeconds === null ? "" : newDynamic.durationSeconds} 
-                onChange={e => setNewDynamic({ ...newDynamic, durationSeconds: parseInt(e.target.value) || null })} 
-                placeholder="Sin tiempo"
+                value={newDynamic.durationSeconds === null || newDynamic.durationSeconds === undefined ? "" : newDynamic.durationSeconds} 
+                onChange={e => setNewDynamic({ ...newDynamic, durationSeconds: e.target.value ? parseInt(e.target.value) : null })} 
+                placeholder="Sin tiempo límite"
               />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Instrucciones</Label>
+              <Label>Instrucciones del Reto</Label>
               <Input 
                 value={newDynamic.instructions || ''} 
                 onChange={e => setNewDynamic({ ...newDynamic, instructions: e.target.value })} 
-                placeholder="Explica qué deben hacer los participantes..."
+                placeholder="¿Qué deben hacer los participantes?"
                 required
               />
             </div>
-            <Button type="submit" className="md:col-span-2" disabled={isSaving}>
+            <Button type="submit" className="md:col-span-2 h-12 text-lg font-bold" disabled={isSaving}>
               {isSaving ? "Guardando..." : (isEditing ? 'Actualizar' : 'Agregar') + " Dinámica"}
             </Button>
             {isEditing && (
@@ -183,27 +221,33 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <h2 className="text-xl font-headline font-semibold flex items-center gap-2">
-          <Database className="w-5 h-5" /> Dinámicas Guardadas ({dynamics.length})
+          <Database className="w-5 h-5 text-primary" /> Lista de Dinámicas ({dynamics.length})
         </h2>
         {dynamics.length === 0 ? (
-          <div className="text-center p-10 bg-muted/20 rounded-xl italic opacity-50">
-            No hay dinámicas creadas.
+          <div className="text-center p-12 bg-muted/20 rounded-xl border-2 border-dashed border-muted">
+            <AlertCircle className="w-10 h-10 mx-auto opacity-20 mb-2" />
+            <p className="opacity-50 italic">No hay dinámicas creadas aún.</p>
+            <Button variant="link" onClick={handleLoadDemo} className="mt-2">Cargar ejemplos ahora</Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {dynamics.map(d => (
-              <Card key={d.id} className="overflow-hidden shadow-sm">
+              <Card key={d.id} className="overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 <div className="p-4 flex items-center justify-between">
                   <div className="space-y-1">
                     <h3 className="font-bold text-lg text-primary">{d.name}</h3>
                     <p className="text-sm opacity-80">{d.instructions}</p>
-                    {d.durationSeconds && <p className="text-xs font-bold uppercase opacity-50">{d.durationSeconds} segundos</p>}
+                    {d.durationSeconds && (
+                      <span className="inline-block bg-primary/10 text-primary text-[10px] font-bold px-2 py-0.5 rounded-full uppercase mt-1">
+                        {d.durationSeconds} seg
+                      </span>
+                    )}
                   </div>
                   <div className="flex gap-2">
-                    <Button size="icon" variant="ghost" onClick={() => { setIsEditing(d.id); setNewDynamic(d); }}>
+                    <Button size="icon" variant="ghost" onClick={() => { setIsEditing(d.id); setNewDynamic(d); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
                       <Edit2 className="w-4 h-4" />
                     </Button>
-                    <Button size="icon" variant="ghost" className="text-destructive" onClick={() => handleDeleteDynamic(d.id)}>
+                    <Button size="icon" variant="ghost" className="text-destructive hover:bg-destructive/10" onClick={() => handleDeleteDynamic(d.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
