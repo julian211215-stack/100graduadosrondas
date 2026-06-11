@@ -1,8 +1,7 @@
-
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useAppSettings, useActiveMatch, localDB, useParticipants } from '@/lib/store';
+import { useAppSettings, localDB, useParticipants, useActiveMatch } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +10,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Camera, CheckCircle2, Trophy, Users, AlertCircle, RefreshCw } from 'lucide-react';
 import { Participant, Dynamic, Vote } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { auth } from '@/lib/firebase';
+import { signInAnonymously } from 'firebase/auth';
 
 export default function PlayPage() {
   const settings = useAppSettings();
@@ -34,18 +35,15 @@ export default function PlayPage() {
   const [opponent, setOpponent] = useState<Participant | null>(null);
   const [participantA, setParticipantA] = useState<Participant | null>(null);
   const [participantB, setParticipantB] = useState<Participant | null>(null);
-  const [activeDynamic, setActiveDynamic] = useState<Dynamic | null>(null);
 
   useEffect(() => {
     const localUser = localStorage.getItem('retos_registered_user');
     if (localUser) {
       const parsed = JSON.parse(localUser);
-      // Verify if still in the general list (in case it was reset)
+      // Verify in cloud list
       const exists = participants.find(p => p.id === parsed.id);
       if (exists) {
         setParticipant(exists);
-      } else {
-        localStorage.removeItem('retos_registered_user');
       }
     }
     setLoading(false);
@@ -53,11 +51,6 @@ export default function PlayPage() {
 
   useEffect(() => {
     if (activeMatch) {
-      const allDynamicsData = localStorage.getItem('retos_dynamics');
-      const allDynamics: Dynamic[] = allDynamicsData ? JSON.parse(allDynamicsData) : [];
-      const foundDynamic = allDynamics.find(d => d.id === activeMatch.dynamicId);
-      if (foundDynamic) setActiveDynamic(foundDynamic);
-
       const pA = participants.find(p => p.id === activeMatch.participantAId);
       const pB = participants.find(p => p.id === activeMatch.participantBId);
       
@@ -79,15 +72,13 @@ export default function PlayPage() {
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        // Simple compression: in a real app we'd use canvas, 
-        // but for a prototype this base64 is fine if not too large.
         setPhotoBase64(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -98,7 +89,14 @@ export default function PlayPage() {
 
     setUploading(true);
     try {
-      const uid = crypto.randomUUID();
+      let uid = crypto.randomUUID();
+      try {
+        const userCred = await signInAnonymously(auth);
+        uid = userCred.user.uid;
+      } catch (authError) {
+        console.warn("Auth failed, using local UUID for registration:", authError);
+      }
+
       const photoUrl = photoBase64 || `https://picsum.photos/seed/${uid}/200`;
 
       const pData: Participant = {
@@ -112,19 +110,19 @@ export default function PlayPage() {
         updatedAt: new Date().toISOString(),
       };
 
-      localDB.saveParticipant(pData);
+      await localDB.saveParticipant(pData);
       localStorage.setItem('retos_registered_user', JSON.stringify(pData));
       setParticipant(pData);
-      toast({ title: "¡Registro exitoso localmente!" });
+      toast({ title: "¡Registro exitoso!" });
     } catch (err: any) {
-      console.error("Error completo al registrarse localmente:", err);
-      setErrorMessage("No se pudo completar el registro local.");
+      console.error("Error al registrarse:", err);
+      setErrorMessage("No se pudo completar el registro. Revisa la consola.");
     } finally {
       setUploading(false);
     }
   };
 
-  const handleVote = (selectedParticipantId: string) => {
+  const handleVote = async (selectedParticipantId: string) => {
     if (!activeMatch || !participant) return;
     
     const vote: Vote = {
@@ -135,9 +133,13 @@ export default function PlayPage() {
       createdAt: new Date().toISOString()
     };
 
-    localDB.castVote(vote);
-    setVotedMatchId(activeMatch.id);
-    toast({ title: "Voto registrado localmente" });
+    try {
+      await localDB.castVote(vote);
+      setVotedMatchId(activeMatch.id);
+      toast({ title: "Voto registrado" });
+    } catch (err) {
+      console.error("Error voting:", err);
+    }
   };
 
   if (loading) return <div className="p-10 text-center text-primary font-bold">Cargando perfil...</div>;
@@ -160,7 +162,7 @@ export default function PlayPage() {
       <div className="p-6 max-w-md mx-auto space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-headline font-bold text-primary">Regístrate</h1>
-          <p className="text-muted-foreground">Únete a la dinámica IDEHA (Modo Local)</p>
+          <p className="text-muted-foreground">Únete a la dinámica IDEHA</p>
         </div>
 
         {errorMessage && (
@@ -246,7 +248,7 @@ export default function PlayPage() {
       </Card>
 
       <div className="mt-4">
-        {activeMatch && activeMatch.status === 'live' && participant.status === 'competing' && opponent && activeDynamic && (
+        {activeMatch && activeMatch.status === 'live' && participant.status === 'competing' && opponent && (
            <Card className="border-secondary border-2 bg-secondary/10 overflow-hidden animate-pulse shadow-xl">
              <CardHeader className="bg-secondary p-4 text-center">
                <CardTitle className="text-white flex items-center justify-center gap-2">
@@ -269,10 +271,6 @@ export default function PlayPage() {
                    <p className="text-xs font-bold truncate w-20">{opponent.name}</p>
                  </div>
                </div>
-               <div className="pt-4 space-y-2">
-                 <h2 className="text-2xl font-headline font-bold text-primary uppercase tracking-tight">{activeDynamic.name}</h2>
-                 <p className="text-sm italic opacity-90">{activeDynamic.instructions}</p>
-               </div>
              </CardContent>
            </Card>
         )}
@@ -288,7 +286,7 @@ export default function PlayPage() {
                   <div className="text-center py-10 space-y-4 animate-in fade-in zoom-in">
                     <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto" />
                     <h3 className="text-xl font-bold">¡Voto registrado!</h3>
-                    <p className="opacity-60">Tu decisión ha sido tomada localmente. Espera los resultados.</p>
+                    <p className="opacity-60">Tu decisión ha sido enviada. Espera los resultados.</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">

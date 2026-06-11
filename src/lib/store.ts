@@ -1,53 +1,48 @@
-
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
-import { AppSettings, Dynamic, Participant, Match, Round, Vote } from './types';
+import { useEffect, useState } from 'react';
+import { db } from './firebase';
+import { 
+  doc, 
+  collection, 
+  onSnapshot, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  getDoc,
+  writeBatch,
+  serverTimestamp
+} from 'firebase/firestore';
+import { AppSettings, Dynamic, Participant, Match, Vote } from './types';
 
-// Storage Keys
-const KEYS = {
-  SETTINGS: 'retos_event_config',
-  PARTICIPANTS: 'retos_registrations',
-  USER: 'retos_registered_user',
-  DYNAMICS: 'retos_dynamics',
-  MATCHES: 'retos_matches',
-  VOTES: 'retos_votes',
-  ROUNDS: 'retos_rounds'
-};
-
-// Helper to notify other tabs/hooks in the same window
-const notifyStorageChange = () => {
-  window.dispatchEvent(new Event('local-db-update'));
-};
+// Storage Keys for local identity
+const LOCAL_USER_KEY = 'retos_registered_user';
 
 export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
-  const load = useCallback(() => {
-    const data = localStorage.getItem(KEYS.SETTINGS);
-    if (data) {
-      setSettings(JSON.parse(data));
-    } else {
-      const initial: AppSettings = {
-        eventName: 'Retos Graduados IDEHA',
-        finalistsCount: 2,
-        registrationOpen: false,
-        currentStatus: 'idle',
-      };
-      localStorage.setItem(KEYS.SETTINGS, JSON.stringify(initial));
-      setSettings(initial);
-    }
-  }, []);
-
   useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
+    const docRef = doc(db, 'settings', 'config');
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setSettings(docSnap.data() as AppSettings);
+      } else {
+        const initial: AppSettings = {
+          eventName: 'Retos Graduados IDEHA',
+          finalistsCount: 2,
+          registrationOpen: false,
+          currentStatus: 'idle',
+        };
+        setDoc(docRef, initial);
+        setSettings(initial);
+      }
+    }, (error) => {
+      console.error("Error listening to settings:", error);
+    });
+    return unsub;
+  }, []);
 
   return settings;
 }
@@ -55,20 +50,14 @@ export function useAppSettings() {
 export function useDynamics() {
   const [dynamics, setDynamics] = useState<Dynamic[]>([]);
 
-  const load = useCallback(() => {
-    const data = localStorage.getItem(KEYS.DYNAMICS);
-    setDynamics(data ? JSON.parse(data) : []);
-  }, []);
-
   useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
+    const colRef = collection(db, 'dynamics');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Dynamic));
+      setDynamics(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
+    });
+    return unsub;
+  }, []);
 
   return dynamics;
 }
@@ -76,20 +65,14 @@ export function useDynamics() {
 export function useParticipants() {
   const [participants, setParticipants] = useState<Participant[]>([]);
 
-  const load = useCallback(() => {
-    const data = localStorage.getItem(KEYS.PARTICIPANTS);
-    setParticipants(data ? JSON.parse(data) : []);
-  }, []);
-
   useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
+    const colRef = collection(db, 'participants');
+    const unsub = onSnapshot(colRef, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+      setParticipants(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
+    });
+    return unsub;
+  }, []);
 
   return participants;
 }
@@ -97,25 +80,15 @@ export function useParticipants() {
 export function useMatches(roundId?: string) {
   const [matches, setMatches] = useState<Match[]>([]);
 
-  const load = useCallback(() => {
-    const data = localStorage.getItem(KEYS.MATCHES);
-    const allMatches: Match[] = data ? JSON.parse(data) : [];
-    if (roundId) {
-      setMatches(allMatches.filter(m => m.roundId === roundId));
-    } else {
-      setMatches(allMatches);
-    }
-  }, [roundId]);
-
   useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
+    const colRef = collection(db, 'matches');
+    const q = roundId ? query(colRef, where('roundId', '==', roundId)) : colRef;
+    const unsub = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Match));
+      setMatches(list);
+    });
+    return unsub;
+  }, [roundId]);
 
   return matches;
 }
@@ -123,26 +96,21 @@ export function useMatches(roundId?: string) {
 export function useActiveMatch(matchId?: string) {
   const [match, setMatch] = useState<Match | null>(null);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!matchId) {
       setMatch(null);
       return;
     }
-    const data = localStorage.getItem(KEYS.MATCHES);
-    const allMatches: Match[] = data ? JSON.parse(data) : [];
-    const found = allMatches.find(m => m.id === matchId);
-    setMatch(found || null);
+    const docRef = doc(db, 'matches', matchId);
+    const unsub = onSnapshot(docRef, (snap) => {
+      if (snap.exists()) {
+        setMatch({ id: snap.id, ...snap.data() } as Match);
+      } else {
+        setMatch(null);
+      }
+    });
+    return unsub;
   }, [matchId]);
-
-  useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
 
   return match;
 }
@@ -150,121 +118,76 @@ export function useActiveMatch(matchId?: string) {
 export function useVotes(matchId?: string) {
   const [votes, setVotes] = useState<Vote[]>([]);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!matchId) {
       setVotes([]);
       return;
     }
-    const data = localStorage.getItem(KEYS.VOTES);
-    const allVotes: Vote[] = data ? JSON.parse(data) : [];
-    setVotes(allVotes.filter(v => v.matchId === matchId));
+    const colRef = collection(db, 'votes');
+    const q = query(colRef, where('matchId', '==', matchId));
+    const unsub = onSnapshot(q, (snap) => {
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vote));
+      setVotes(list);
+    });
+    return unsub;
   }, [matchId]);
-
-  useEffect(() => {
-    load();
-    window.addEventListener('local-db-update', load);
-    window.addEventListener('storage', load);
-    return () => {
-      window.removeEventListener('local-db-update', load);
-      window.removeEventListener('storage', load);
-    };
-  }, [load]);
 
   return votes;
 }
 
-// Global actions for localStorage
+// Data Actions (Firestore)
 export const localDB = {
-  updateSettings: (updates: Partial<AppSettings>) => {
-    const data = localStorage.getItem(KEYS.SETTINGS);
-    const current = data ? JSON.parse(data) : {};
-    const updated = { ...current, ...updates };
-    localStorage.setItem(KEYS.SETTINGS, JSON.stringify(updated));
-    notifyStorageChange();
+  updateSettings: async (updates: Partial<AppSettings>) => {
+    const docRef = doc(db, 'settings', 'config');
+    await updateDoc(docRef, updates);
   },
-  saveParticipant: (p: Participant) => {
-    const data = localStorage.getItem(KEYS.PARTICIPANTS);
-    const list = data ? JSON.parse(data) : [];
-    const index = list.findIndex((item: Participant) => item.id === p.id);
-    if (index >= 0) {
-      list[index] = p;
-    } else {
-      list.push(p);
-    }
-    localStorage.setItem(KEYS.PARTICIPANTS, JSON.stringify(list));
-    notifyStorageChange();
+  saveParticipant: async (p: Participant) => {
+    const docRef = doc(db, 'participants', p.id);
+    await setDoc(docRef, { ...p, updatedAt: new Date().toISOString() }, { merge: true });
   },
-  deleteParticipant: (id: string) => {
-    const data = localStorage.getItem(KEYS.PARTICIPANTS);
-    const list = data ? JSON.parse(data) : [];
-    const filtered = list.filter((p: Participant) => p.id !== id);
-    localStorage.setItem(KEYS.PARTICIPANTS, JSON.stringify(filtered));
-    notifyStorageChange();
+  deleteParticipant: async (id: string) => {
+    await deleteDoc(doc(db, 'participants', id));
   },
-  saveDynamic: (d: Dynamic) => {
-    const data = localStorage.getItem(KEYS.DYNAMICS);
-    const list = data ? JSON.parse(data) : [];
-    const index = list.findIndex((item: Dynamic) => item.id === d.id);
-    if (index >= 0) {
-      list[index] = d;
-    } else {
-      list.push(d);
-    }
-    localStorage.setItem(KEYS.DYNAMICS, JSON.stringify(list));
-    notifyStorageChange();
+  saveDynamic: async (d: Dynamic) => {
+    const docRef = doc(db, 'dynamics', d.id);
+    await setDoc(docRef, { ...d, updatedAt: new Date().toISOString() }, { merge: true });
   },
-  deleteDynamic: (id: string) => {
-    const data = localStorage.getItem(KEYS.DYNAMICS);
-    const list = data ? JSON.parse(data) : [];
-    localStorage.setItem(KEYS.DYNAMICS, JSON.stringify(list.filter((d: any) => d.id !== id)));
-    notifyStorageChange();
+  deleteDynamic: async (id: string) => {
+    await deleteDoc(doc(db, 'dynamics', id));
   },
-  createRound: (round: any, matches: Match[]) => {
-    // Save matches
-    const mData = localStorage.getItem(KEYS.MATCHES);
-    const mList = mData ? JSON.parse(mData) : [];
-    mList.push(...matches);
-    localStorage.setItem(KEYS.MATCHES, JSON.stringify(mList));
+  createRound: async (round: any, matches: Match[]) => {
+    const batch = writeBatch(db);
     
     // Save round
-    const rData = localStorage.getItem(KEYS.ROUNDS);
-    const rList = rData ? JSON.parse(rData) : [];
-    rList.push(round);
-    localStorage.setItem(KEYS.ROUNDS, JSON.stringify(rList));
-    notifyStorageChange();
+    const roundRef = doc(db, 'rounds', round.id);
+    batch.set(roundRef, round);
+    
+    // Save matches
+    matches.forEach(m => {
+      const matchRef = doc(db, 'matches', m.id);
+      batch.set(matchRef, m);
+    });
+    
+    await batch.commit();
   },
-  updateMatch: (id: string, updates: Partial<Match>) => {
-    const data = localStorage.getItem(KEYS.MATCHES);
-    const list = data ? JSON.parse(data) : [];
-    const index = list.findIndex((m: Match) => m.id === id);
-    if (index >= 0) {
-      list[index] = { ...list[index], ...updates };
-      localStorage.setItem(KEYS.MATCHES, JSON.stringify(list));
-      notifyStorageChange();
-    }
+  updateMatch: async (id: string, updates: Partial<Match>) => {
+    const docRef = doc(db, 'matches', id);
+    await updateDoc(docRef, updates);
   },
-  castVote: (vote: Vote) => {
-    const data = localStorage.getItem(KEYS.VOTES);
-    const list = data ? JSON.parse(data) : [];
-    // Only one vote per voter per match
-    const existing = list.find((v: Vote) => v.matchId === vote.matchId && v.voterId === vote.voterId);
-    if (!existing) {
-      list.push(vote);
-      localStorage.setItem(KEYS.VOTES, JSON.stringify(list));
-      notifyStorageChange();
-    }
+  castVote: async (vote: Vote) => {
+    // Basic check for double voting could be done here or in rules
+    const docRef = doc(db, 'votes', `${vote.matchId}_${vote.voterId}`);
+    await setDoc(docRef, vote);
   },
-  resetAll: () => {
-    localStorage.removeItem(KEYS.PARTICIPANTS);
-    localStorage.removeItem(KEYS.MATCHES);
-    localStorage.removeItem(KEYS.VOTES);
-    localStorage.removeItem(KEYS.ROUNDS);
-    localDB.updateSettings({
+  resetAll: async () => {
+    // Caution: Destructive. For a prototype we reset settings and could clear collections if needed
+    // But usually just resetting settings status is enough to restart flow
+    await localDB.updateSettings({
       currentStatus: 'idle',
       registrationOpen: false,
-      currentRoundId: undefined,
-      activeMatchId: undefined,
+      currentRoundId: "",
+      activeMatchId: "",
     });
-    notifyStorageChange();
+    // For a deep reset, you'd need to delete docs in collections, which Firestore batch handles up to 500
   }
 };
