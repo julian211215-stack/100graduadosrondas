@@ -187,7 +187,7 @@ export function useVotes(matchId?: string) {
   return votes;
 }
 
-// Data Actions (Firestore Only)
+// Data Actions (Firestore)
 export const localDB = {
   updateSettings: async (updates: Partial<AppSettings>) => {
     try {
@@ -267,6 +267,7 @@ export const localDB = {
   },
   resetAll: async () => {
     try {
+      if(!confirm("¿Deseas reiniciar todo el estado del evento (Ajustes, Rondas y Votos)? Los participantes permanecerán.")) return;
       await localDB.updateSettings({
         currentStatus: 'idle',
         registrationOpen: false,

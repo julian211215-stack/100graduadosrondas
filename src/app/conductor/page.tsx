@@ -30,8 +30,8 @@ export default function ConductorPage() {
   const activeMatch = useMemo(() => matches.find(m => m.id === activeMatchId), [matches, activeMatchId]);
   const votes = useVotes(activeMatchId || undefined);
 
-  // All participants are eligible for manual duels
-  const allParticipants = useMemo(() => 
+  // Eligible participants for manual duels are those with mode 'participant'
+  const eligibleParticipants = useMemo(() => 
     participants.filter(p => p.mode === 'participant'), 
   [participants]);
 
@@ -39,7 +39,7 @@ export default function ConductorPage() {
     total: participants.length,
     competitors: participants.filter(p => p.mode === 'participant').length,
     voters: participants.filter(p => p.mode === 'voter').length,
-    active: participants.filter(p => p.status !== 'eliminated').length,
+    active: participants.filter(p => p.status !== 'eliminated' && p.mode === 'participant').length,
     eliminated: participants.filter(p => p.status === 'eliminated').length,
   };
 
@@ -89,7 +89,7 @@ export default function ConductorPage() {
       setManualA("");
       setManualB("");
       setManualDyn("");
-      toast({ title: "Duelo manual creado" });
+      toast({ title: "Duelo manual creado con éxito" });
     } catch (error) {
       toast({ title: "Error al crear duelo", variant: "destructive" });
     }
@@ -102,11 +102,11 @@ export default function ConductorPage() {
     }
     
     const available = participants.filter(p => 
-      (p.status !== 'eliminated') && p.mode === 'participant'
+      p.status !== 'eliminated' && p.mode === 'participant'
     );
     
     if (available.length < 2) {
-      toast({ title: "No hay suficientes participantes activos", variant: "destructive" });
+      toast({ title: "No hay suficientes participantes disponibles", variant: "destructive" });
       return;
     }
 
@@ -149,13 +149,12 @@ export default function ConductorPage() {
       currentStatus: 'dueling'
     });
 
-    toast({ title: "Ronda sorteada" });
+    toast({ title: "Ronda sorteada con éxito" });
   };
 
   const handleStartMatch = () => {
     if (!activeMatch) return;
     localDB.updateMatch(activeMatch.id, { status: 'live' });
-    localDB.updateSettings({ currentStatus: 'dueling' });
   };
 
   const handleOpenVoting = () => {
@@ -209,6 +208,12 @@ export default function ConductorPage() {
     toast({ title: "Participante rehabilitado" });
   };
 
+  const handleToggleMode = async (p: Participant) => {
+    const newMode = p.mode === 'participant' ? 'voter' : 'participant';
+    await localDB.saveParticipant({ ...p, mode: newMode });
+    toast({ title: `Rol cambiado a ${newMode === 'participant' ? 'Participante' : 'Solo Votar'}` });
+  };
+
   const voteCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     votes.forEach(v => {
@@ -234,7 +239,7 @@ export default function ConductorPage() {
             {settings?.eventName || 'Retos Graduados'}
           </h1>
           <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-[0.3em] flex items-center gap-2">
-            Panel del Conductor <Badge variant="outline" className="text-[9px] border-primary/20">Manual & Real-time</Badge>
+            Panel del Conductor <Badge variant="outline" className="text-[9px] border-primary/20">Real-time Control</Badge>
           </p>
         </div>
         <div className="flex gap-2">
@@ -242,7 +247,7 @@ export default function ConductorPage() {
               {settings?.registrationOpen ? "Cerrar Registro" : "Abrir Registro"}
            </Button>
            <Button variant="outline" onClick={() => localDB.resetAll()} className="rounded-xl h-12 font-bold">
-              Reiniciar
+              Reiniciar Todo
            </Button>
         </div>
       </div>
@@ -275,7 +280,7 @@ export default function ConductorPage() {
                 {!activeMatch ? (
                    <div className="text-center py-16 space-y-4">
                       <Trophy className="w-16 h-16 opacity-20 mx-auto" />
-                      <p className="text-muted-foreground font-medium uppercase tracking-widest text-sm">Arma un duelo manual para comenzar</p>
+                      <p className="text-muted-foreground font-medium uppercase tracking-widest text-sm">Crea un duelo manual para comenzar</p>
                    </div>
                 ) : (
                    <div className="space-y-8 animate-in fade-in zoom-in duration-300">
@@ -334,9 +339,6 @@ export default function ConductorPage() {
                                 </span>
                               </Button>
                            </div>
-                           {suggestedWinnerId === null && (voteCounts[activeMatch.participantAId] > 0 || voteCounts[activeMatch.participantBId] > 0) && (
-                             <p className="text-[10px] text-center text-secondary font-bold uppercase">Empate Técnico - Decisión manual requerida</p>
-                           )}
                         </div>
                       )}
 
@@ -371,7 +373,7 @@ export default function ConductorPage() {
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {allParticipants.map(p => (
+                      {eligibleParticipants.map(p => (
                         <SelectItem key={p.id} value={p.id}>{p.name} ({p.label || p.status})</SelectItem>
                       ))}
                     </SelectContent>
@@ -384,7 +386,7 @@ export default function ConductorPage() {
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {allParticipants.map(p => (
+                      {eligibleParticipants.map(p => (
                         <SelectItem key={p.id} value={p.id}>{p.name} ({p.label || p.status})</SelectItem>
                       ))}
                     </SelectContent>
@@ -415,7 +417,7 @@ export default function ConductorPage() {
            <Card className="shadow-xl border-none h-full max-h-[900px] flex flex-col overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/5">
                 <CardTitle className="text-base font-black uppercase">Participantes ({participants.length})</CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => window.location.reload()} title="Forzar Recarga"><RefreshCw className="w-4 h-4"/></Button>
+                <Button variant="ghost" size="icon" onClick={() => window.location.reload()} title="Actualizar"><RefreshCw className="w-4 h-4"/></Button>
               </CardHeader>
               <CardContent className="p-0 overflow-auto flex-1">
                 <div className="divide-y">
@@ -457,10 +459,10 @@ export default function ConductorPage() {
                                <RefreshCw className="w-3 h-3" />
                              </Button>
                            )}
-                           <Button size="icon" variant="ghost" className="h-7 w-7 text-primary" onClick={() => localDB.saveParticipant({ ...p, mode: p.mode === 'participant' ? 'voter' : 'participant' })}>
+                           <Button size="icon" variant="ghost" className={`h-7 w-7 ${p.mode === 'participant' ? 'text-primary' : 'text-muted-foreground'}`} onClick={() => handleToggleMode(p)} title={p.mode === 'participant' ? 'Cambiar a Solo Votar' : 'Cambiar a Participante'}>
                              <Shuffle className="w-3 h-3" />
                            </Button>
-                           <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => localDB.deleteParticipant(p.id)}>
+                           <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive" onClick={() => { if(confirm("¿Eliminar?")) localDB.deleteParticipant(p.id) }}>
                              <XCircle className="w-3 h-3" />
                            </Button>
                         </div>

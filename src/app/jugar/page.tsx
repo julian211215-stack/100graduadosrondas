@@ -15,14 +15,17 @@ import { auth, db } from '@/lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 
+const STORAGE_KEY = 'retos_registered_user_id';
+
 export default function PlayPage() {
   const settings = useAppSettings();
   const participants = useParticipants();
   const { toast } = useToast();
   
   const [participant, setParticipant] = useState<Participant | null>(null);
+  const [currentId, setCurrentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   
   const [regData, setRegData] = useState({
     name: '',
@@ -30,55 +33,48 @@ export default function PlayPage() {
     mode: 'participant' as 'participant' | 'voter',
   });
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [votedMatchId, setVotedMatchId] = useState<string | null>(null);
 
   const activeMatch = useActiveMatch(settings?.activeMatchId || undefined);
 
-  // Sync participant with Firestore and validate existence
+  // Load initial ID from storage
   useEffect(() => {
-    let localId = '';
-    try {
-      const localUserStr = localStorage.getItem('retos_registered_user');
-      if (localUserStr) {
-        const parsed = JSON.parse(localUserStr);
-        localId = parsed?.id;
-      }
-    } catch (e) {
-      console.error("Error reading localStorage", e);
-    }
-
-    if (!localId) {
+    const savedId = localStorage.getItem(STORAGE_KEY);
+    if (savedId) {
+      setCurrentId(savedId);
+    } else {
       setLoading(false);
+    }
+  }, []);
+
+  // Sync participant with Firestore based on currentId
+  useEffect(() => {
+    if (!currentId) {
       setParticipant(null);
+      setLoading(false);
       return;
     }
 
-    // Subscribe to specific participant to detect deletion
-    const unsub = onSnapshot(doc(db, 'participants', localId), (snap) => {
+    setLoading(true);
+    const unsub = onSnapshot(doc(db, 'participants', currentId), (snap) => {
       if (snap.exists()) {
-        setParticipant({ id: snap.id, ...snap.data() } as Participant);
-        setLoading(false);
+        const data = snap.data();
+        setParticipant({ id: snap.id, ...data } as Participant);
       } else {
-        console.log("Participante ya no existe en Firestore, limpiando sesión local");
-        localStorage.removeItem('retos_registered_user');
+        localStorage.removeItem(STORAGE_KEY);
         setParticipant(null);
-        setLoading(false);
-        toast({ 
-          title: "Registro inactivo", 
-          description: "Tu registro fue eliminado. Regístrate de nuevo.",
-          variant: "destructive"
-        });
+        setCurrentId(null);
       }
+      setLoading(false);
     }, (err) => {
-      console.error("Error validando participante:", err);
+      console.error("Error syncing participant:", err);
       setLoading(false);
     });
 
     return unsub;
-  }, [toast]);
+  }, [currentId]);
 
-  // Derived Match Info with extreme safety
+  // Derived Match Info with safety
   const matchInfo = useMemo(() => {
     if (!activeMatch || !participants.length || !participant) return null;
     
@@ -101,53 +97,56 @@ export default function PlayPage() {
     return { activeMatch, pA, pB, role, opponent };
   }, [activeMatch, participants, participant]);
 
-  const compressImage = (base64Str: string): Promise<string> => {
+  const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
-      const img = new Image();
-      img.src = base64Str;
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 300;
-        const MAX_HEIGHT = 300;
-        let width = img.width;
-        let height = img.height;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 300;
+          let width = img.width;
+          let height = img.height;
 
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
           }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.src = e.target?.result as string;
       };
-      img.onerror = () => resolve(base64Str);
+      reader.readAsDataURL(file);
     });
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const result = reader.result as string;
-        const compressed = await compressImage(result);
+      try {
+        const compressed = await compressImage(file);
         setPhotoBase64(compressed);
-      };
-      reader.readAsDataURL(file);
+      } catch (err) {
+        toast({ title: "Error al procesar imagen", variant: "destructive" });
+      }
     }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (uploading) return;
     if (!regData.name || !regData.generationId) {
       toast({ title: "Completa todos los campos", variant: "destructive" });
       return;
@@ -170,18 +169,22 @@ export default function PlayPage() {
         photoUrl: photoBase64 || `https://picsum.photos/seed/${uid}/200`,
         mode: regData.mode,
         status: regData.mode === 'participant' ? 'available' : 'waiting',
-        label: 'Registrado',
+        label: 'Activo',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
       await localDB.saveParticipant(pData);
-      localStorage.setItem('retos_registered_user', JSON.stringify(pData));
-      // State will be updated by onSnapshot
-      toast({ title: "¡Registrado con éxito!" });
+      localStorage.setItem(STORAGE_KEY, uid);
+      setCurrentId(uid); // This triggers the useEffect to show the personal screen
+      toast({ title: "¡Bienvenido al evento!" });
     } catch (err: any) {
       console.error("Error al registrarse:", err);
-      toast({ title: "Error en el registro", description: err.message, variant: "destructive" });
+      toast({ 
+        title: "Error en el registro", 
+        description: err.code + " - " + err.message, 
+        variant: "destructive" 
+      });
     } finally {
       setUploading(false);
     }
@@ -199,16 +202,17 @@ export default function PlayPage() {
       };
       await localDB.castVote(vote);
       setVotedMatchId(activeMatch.id);
-      toast({ title: "Voto enviado" });
+      toast({ title: "Voto enviado correctamente" });
     } catch (err) {
       console.error("Error al votar:", err);
     }
   };
 
   const handleClearSession = () => {
-    if (confirm("¿Estás seguro de que quieres limpiar este registro de tu dispositivo? Esto te permitirá registrarte de nuevo.")) {
-      localStorage.removeItem('retos_registered_user');
+    if (confirm("¿Quieres limpiar tu sesión actual? Podrás registrarte de nuevo.")) {
+      localStorage.removeItem(STORAGE_KEY);
       setParticipant(null);
+      setCurrentId(null);
     }
   };
 
@@ -216,21 +220,8 @@ export default function PlayPage() {
     <div className="min-h-screen flex items-center justify-center bg-background p-6">
       <div className="text-center space-y-4">
         <RefreshCw className="w-10 h-10 animate-spin text-primary mx-auto" />
-        <p className="font-bold text-primary animate-pulse uppercase tracking-widest text-xs">Cargando Perfil...</p>
+        <p className="font-black text-primary uppercase tracking-widest text-xs">Cargando Perfil...</p>
       </div>
-    </div>
-  );
-
-  if (error) return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-6">
-      <Card className="max-w-md w-full border-destructive">
-        <CardContent className="pt-6 text-center space-y-4">
-          <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
-          <h2 className="text-xl font-bold">Error en la Aplicación</h2>
-          <p className="text-sm text-muted-foreground">{error}</p>
-          <Button onClick={() => window.location.reload()} className="w-full">Reintentar</Button>
-        </CardContent>
-      </Card>
     </div>
   );
 
@@ -241,7 +232,7 @@ export default function PlayPage() {
           <div className="p-8 bg-card rounded-[2rem] border-2 border-dashed border-primary/20 space-y-4 shadow-xl">
              <Users className="w-16 h-16 text-muted-foreground mx-auto opacity-30" />
              <h2 className="text-2xl font-black uppercase tracking-tighter">Registro Cerrado</h2>
-             <p className="text-muted-foreground text-sm uppercase tracking-widest max-w-[200px] mx-auto">Espera instrucciones del conductor.</p>
+             <p className="text-muted-foreground text-sm uppercase tracking-widest max-w-[200px] mx-auto">Espera instrucciones del conductor para iniciar.</p>
              <Button variant="ghost" size="sm" onClick={() => window.location.reload()} className="text-[10px]"><RefreshCw className="w-3 h-3 mr-2" /> Actualizar</Button>
           </div>
         </div>
@@ -252,7 +243,7 @@ export default function PlayPage() {
       <div className="p-6 max-w-md mx-auto space-y-8 animate-in fade-in duration-500">
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-black font-headline text-primary uppercase tracking-tighter">Regístrate</h1>
-          <p className="text-muted-foreground text-xs uppercase tracking-[0.3em]">Retos IDEHA México</p>
+          <p className="text-muted-foreground text-xs uppercase tracking-[0.3em]">100 Graduados Dijeron</p>
         </div>
 
         <Card className="border-2 border-primary/20 shadow-2xl overflow-hidden rounded-[2rem]">
@@ -265,6 +256,7 @@ export default function PlayPage() {
                   value={regData.name} 
                   onChange={e => setRegData({...regData, name: e.target.value})} 
                   placeholder="Ej. Julián Domínguez" 
+                  disabled={uploading}
                   required
                 />
               </div>
@@ -275,6 +267,7 @@ export default function PlayPage() {
                   value={regData.generationId} 
                   onChange={e => setRegData({...regData, generationId: e.target.value})} 
                   placeholder="Ej. G120" 
+                  disabled={uploading}
                   required
                 />
               </div>
@@ -294,7 +287,6 @@ export default function PlayPage() {
                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('cam-input')?.click()} disabled={uploading} className="rounded-lg h-9 w-full">
                       <Camera className="w-4 h-4 mr-2" /> {photoBase64 ? 'Cambiar' : 'Capturar'}
                     </Button>
-                    <p className="text-[8px] text-muted-foreground text-center uppercase">Máx 150KB (Auto-comprimida)</p>
                   </div>
                 </div>
               </div>
@@ -314,7 +306,7 @@ export default function PlayPage() {
               </div>
 
               <Button type="submit" className="w-full h-14 rounded-2xl text-lg font-black uppercase tracking-widest shadow-xl shadow-primary/20" disabled={uploading}>
-                {uploading ? 'Procesando...' : 'Entrar al Evento'}
+                {uploading ? 'Registrando...' : 'Entrar al Evento'}
               </Button>
             </form>
           </CardContent>
@@ -331,11 +323,11 @@ export default function PlayPage() {
             <img src={participant.photoUrl || `https://picsum.photos/seed/${participant.id}/200`} className="w-full h-full object-cover" alt={participant.name} />
           </div>
           <div className="overflow-hidden space-y-1">
-            <h3 className="font-black text-xl leading-tight truncate uppercase tracking-tighter">{participant.name || 'Participante'}</h3>
-            <p className="text-[10px] font-bold uppercase opacity-50 tracking-widest">Gen: {participant.generationId || 'IDEHA'} • {participant.mode === 'participant' ? 'Competidor' : 'Votante'}</p>
+            <h3 className="font-black text-xl leading-tight truncate uppercase tracking-tighter">{participant.name}</h3>
+            <p className="text-[10px] font-bold uppercase opacity-50 tracking-widest">Gen: {participant.generationId} • {participant.mode === 'participant' ? 'Competidor' : 'Votante'}</p>
             <div className="flex gap-2 items-center">
                <span className="bg-primary text-black text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
-                 {participant.label || participant.status || 'Activo'}
+                 {participant.label || 'Activo'}
                </span>
                <button onClick={() => window.location.reload()} className="p-1 hover:bg-primary/20 rounded-full transition-colors">
                   <RefreshCw className="w-3 h-3 text-primary" />
@@ -349,8 +341,7 @@ export default function PlayPage() {
       </Card>
 
       <div className="space-y-6">
-        {/* DUELO EN CURSO (SI ERES COMPETIDOR) */}
-        {matchInfo && matchInfo.activeMatch?.status === 'live' && matchInfo.role === 'competitor' && (
+        {matchInfo?.activeMatch?.status === 'live' && matchInfo?.role === 'competitor' && (
            <Card className="border-secondary border-4 bg-secondary/10 overflow-hidden animate-pulse shadow-2xl rounded-[2.5rem]">
              <div className="bg-secondary p-4 text-center">
                <h2 className="text-white font-black text-2xl uppercase italic flex items-center justify-center gap-3">
@@ -375,14 +366,13 @@ export default function PlayPage() {
                </div>
                <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border-2 border-secondary/20">
                   <p className="text-[10px] font-black text-secondary uppercase tracking-widest mb-1">RETO ACTUAL</p>
-                  <p className="text-sm font-bold leading-tight">{matchInfo.activeMatch.dynamicId ? 'Sigue las instrucciones en pantalla' : 'Cargando dinámica...'}</p>
+                  <p className="text-sm font-bold leading-tight">Sigue las instrucciones del conductor</p>
                </div>
              </CardContent>
            </Card>
         )}
 
-        {/* VOTACIÓN ABIERTA */}
-        {matchInfo && matchInfo.activeMatch?.status === 'voting' && (
+        {matchInfo?.activeMatch?.status === 'voting' && (
            <Card className="border-primary border-4 shadow-2xl rounded-[3rem] overflow-hidden bg-card/50 backdrop-blur-xl">
              <CardHeader className="text-center pb-0 bg-primary/10 py-6">
                <CardTitle className="text-primary font-black uppercase text-2xl tracking-tighter">¿Quién lo hizo mejor?</CardTitle>
@@ -417,7 +407,6 @@ export default function PlayPage() {
            </Card>
         )}
 
-        {/* PANTALLA DE ESPERA O COMPROMISO */}
         {(!matchInfo || 
           matchInfo.activeMatch?.status === 'pending' || 
           matchInfo.activeMatch?.status === 'completed' || 
