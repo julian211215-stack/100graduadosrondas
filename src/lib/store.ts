@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from 'react';
@@ -15,13 +16,16 @@ import {
 } from 'firebase/firestore';
 import { AppSettings, Dynamic, Participant, Match, Vote } from './types';
 
-// Helper to sanitize data for Firestore (remove undefined, replace with null)
+/**
+ * Sanitizes data for Firestore by removing undefined values.
+ * Firestore does not support undefined; it must be null or omitted.
+ */
 function sanitize(data: any) {
   const clean: any = {};
   Object.keys(data).forEach(key => {
     if (data[key] === undefined) {
       clean[key] = null;
-    } else if (data[key] !== undefined) {
+    } else {
       clean[key] = data[key];
     }
   });
@@ -32,11 +36,11 @@ export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    const docRef = doc(db, 'settings', 'config');
+    // We use settings/main as the single source of truth for event config
+    const docRef = doc(db, 'settings', 'main');
     const unsub = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        // Safe merge with defaults to avoid breaking if extra fields exist
         setSettings({
           eventName: data.eventName || 'Retos Graduados IDEHA',
           finalistsCount: data.finalistsCount || 2,
@@ -72,19 +76,20 @@ export function useDynamics() {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        // Tolerant filtering: only keep docs that look like dynamics
-        .filter(d => d.name && typeof d.instructions === 'string')
+        // Filter out non-dynamic documents and handle legacy data
+        .filter(d => d.name && d.instructions)
         .map(d => ({
           id: d.id,
           name: d.name,
           instructions: d.instructions,
-          durationSeconds: d.durationSeconds || null,
-          votingCriteria: d.votingCriteria || "",
+          durationSeconds: d.durationSeconds ?? null,
+          votingCriteria: d.votingCriteria ?? "",
           active: d.active !== false,
           createdAt: d.createdAt || new Date().toISOString(),
           updatedAt: d.updatedAt || new Date().toISOString(),
         } as Dynamic));
       
+      // Client-side sort to avoid requiring composite indexes
       setDynamics(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
     }, (error) => {
       console.error("Error listening to dynamics:", error);
@@ -103,7 +108,6 @@ export function useParticipants() {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        // Filter out any non-participant data
         .filter(p => p.name && p.generationId)
         .map(p => ({
           ...p,
@@ -190,8 +194,8 @@ export function useVotes(matchId?: string) {
 export const localDB = {
   updateSettings: async (updates: Partial<AppSettings>) => {
     try {
-      const docRef = doc(db, 'settings', 'config');
-      await updateDoc(docRef, sanitize(updates));
+      const docRef = doc(db, 'settings', 'main');
+      await setDoc(docRef, sanitize({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
     } catch (error: any) {
       console.error("Error al guardar ajustes:", error);
       throw error;

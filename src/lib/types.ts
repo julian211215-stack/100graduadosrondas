@@ -18,8 +18,8 @@ export interface Dynamic {
   id: string;
   name: string;
   instructions: string;
-  durationSeconds?: number;
-  votingCriteria?: string;
+  durationSeconds: number | null;
+  votingCriteria: string | null;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -66,6 +66,6 @@ export interface AppSettings {
   registrationOpen: boolean;
   currentStatus: "idle" | "registration" | "sorting" | "dueling" | "results" | "finished";
   currentRoundId?: string;
-  currentMatchId?: string;
   activeMatchId?: string;
+  updatedAt?: string;
 }

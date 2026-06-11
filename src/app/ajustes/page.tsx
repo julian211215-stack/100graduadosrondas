@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppSettings, useDynamics, localDB } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,17 +15,37 @@ export default function SettingsPage() {
   const settings = useAppSettings();
   const dynamics = useDynamics();
   const { toast } = useToast();
+  
+  // Local state for forms to avoid unnecessary Firestore writes on every keystroke
+  const [localSettings, setLocalSettings] = useState({
+    eventName: '',
+    finalistsCount: 2
+  });
+  
   const [newDynamic, setNewDynamic] = useState<Partial<Dynamic>>({});
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Sync local state when Firestore settings load
+  useEffect(() => {
+    if (settings) {
+      setLocalSettings({
+        eventName: settings.eventName,
+        finalistsCount: settings.finalistsCount
+      });
+    }
+  }, [settings]);
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!settings) return;
     setIsSaving(true);
     try {
-      await localDB.updateSettings(settings);
-      toast({ title: "Ajustes guardados correctamente" });
+      await localDB.updateSettings({
+        eventName: localSettings.eventName,
+        finalistsCount: localSettings.finalistsCount
+      });
+      toast({ title: "Ajustes guardados en la nube" });
     } catch (error: any) {
       toast({ 
         title: "Error al guardar ajustes", 
@@ -50,7 +71,7 @@ export default function SettingsPage() {
         name: newDynamic.name,
         instructions: newDynamic.instructions,
         durationSeconds: newDynamic.durationSeconds ?? null,
-        votingCriteria: newDynamic.votingCriteria || "",
+        votingCriteria: newDynamic.votingCriteria ?? "",
         active: true,
         createdAt: newDynamic.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -59,7 +80,7 @@ export default function SettingsPage() {
       await localDB.saveDynamic(dynamicToSave);
       setIsEditing(null);
       setNewDynamic({});
-      toast({ title: "Dinámica guardada correctamente" });
+      toast({ title: isEditing ? "Dinámica actualizada" : "Dinámica agregada" });
     } catch (error: any) {
       console.error("Error al guardar dinámica:", error);
       toast({ 
@@ -93,7 +114,7 @@ export default function SettingsPage() {
           updatedAt: new Date().toISOString()
         } as Dynamic);
       }
-      toast({ title: "Dinámicas demo cargadas" });
+      toast({ title: "Dinámicas demo cargadas en la nube" });
     } catch (error: any) {
       toast({ title: "Error al cargar demo", description: error.message, variant: "destructive" });
     } finally {
@@ -102,7 +123,7 @@ export default function SettingsPage() {
   };
 
   const handleDeleteDynamic = async (id: string) => {
-    if (!confirm("¿Eliminar esta dinámica?")) return;
+    if (!confirm("¿Eliminar esta dinámica de la base de datos?")) return;
     try {
       await localDB.deleteDynamic(id);
       toast({ title: "Dinámica eliminada" });
@@ -112,10 +133,10 @@ export default function SettingsPage() {
   };
 
   const handleClearEvent = async () => {
-    if (!confirm("¿Seguro que quieres reiniciar el estado del evento?")) return;
+    if (!confirm("¿Seguro que quieres reiniciar el estado del evento? Esto afectará a todos los dispositivos.")) return;
     try {
       await localDB.resetAll();
-      toast({ title: "Evento reiniciado" });
+      toast({ title: "Estado del evento reiniciado" });
     } catch (error: any) {
       toast({ title: "Error al reiniciar", description: error.message, variant: "destructive" });
     }
@@ -126,7 +147,7 @@ export default function SettingsPage() {
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento</h1>
-          <p className="text-muted-foreground text-sm">Gestiona la configuración y las dinámicas del torneo.</p>
+          <p className="text-muted-foreground text-sm">Gestiona la configuración y las dinámicas en tiempo real.</p>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           <Button variant="outline" onClick={handleLoadDemo} disabled={isSaving} className="flex-1">
@@ -148,8 +169,8 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label>Nombre del Evento</Label>
                 <Input 
-                  value={settings.eventName} 
-                  onChange={e => localDB.updateSettings({ eventName: e.target.value })} 
+                  value={localSettings.eventName} 
+                  onChange={e => setLocalSettings({ ...localSettings, eventName: e.target.value })} 
                 />
               </div>
               <div className="space-y-2">
@@ -158,8 +179,8 @@ export default function SettingsPage() {
                   type="number" 
                   min="2" 
                   max="3" 
-                  value={settings.finalistsCount} 
-                  onChange={e => localDB.updateSettings({ finalistsCount: parseInt(e.target.value) || 2 })} 
+                  value={localSettings.finalistsCount} 
+                  onChange={e => setLocalSettings({ ...localSettings, finalistsCount: parseInt(e.target.value) || 2 })} 
                 />
               </div>
               <Button type="submit" className="w-full" disabled={isSaving}>
@@ -168,7 +189,7 @@ export default function SettingsPage() {
             </form>
           ) : (
             <div className="p-4 text-center opacity-50 flex items-center justify-center gap-2">
-              <RefreshCw className="w-4 h-4 animate-spin" /> Cargando ajustes...
+              <RefreshCw className="w-4 h-4 animate-spin" /> Conectando con Firestore...
             </div>
           )}
         </CardContent>
@@ -221,12 +242,12 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <h2 className="text-xl font-headline font-semibold flex items-center gap-2">
-          <Database className="w-5 h-5 text-primary" /> Lista de Dinámicas ({dynamics.length})
+          <Database className="w-5 h-5 text-primary" /> Lista de Dinámicas en la Nube ({dynamics.length})
         </h2>
         {dynamics.length === 0 ? (
           <div className="text-center p-12 bg-muted/20 rounded-xl border-2 border-dashed border-muted">
             <AlertCircle className="w-10 h-10 mx-auto opacity-20 mb-2" />
-            <p className="opacity-50 italic">No hay dinámicas creadas aún.</p>
+            <p className="opacity-50 italic">No hay dinámicas en la base de datos.</p>
             <Button variant="link" onClick={handleLoadDemo} className="mt-2">Cargar ejemplos ahora</Button>
           </div>
         ) : (

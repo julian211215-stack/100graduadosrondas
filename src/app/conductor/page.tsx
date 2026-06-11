@@ -41,7 +41,7 @@ export default function ConductorPage() {
       return;
     }
     
-    const available = participants.filter(p => (p.status === 'available' || p.status === 'advanced' || p.status === 'waiting') && p.mode === 'participant');
+    const available = participants.filter(p => (p.status === 'available' || p.status === 'advanced' || p.status === 'waiting' || p.status === 'finalist') && p.mode === 'participant');
     
     if (available.length < 2) {
       toast({ title: "No hay suficientes participantes para un sorteo", variant: "destructive" });
@@ -91,14 +91,19 @@ export default function ConductorPage() {
       currentStatus: 'sorting'
     });
 
-    toast({ title: "Ronda sorteada con éxito (Local)" });
+    toast({ title: "Ronda sorteada con éxito" });
   };
 
   const handleStartMatch = () => {
     if (!activeMatch) return;
     localDB.updateMatch(activeMatch.id, { status: 'live' });
-    localDB.saveParticipant({ ...participants.find(p => p.id === activeMatch.participantAId)!, status: 'competing' });
-    localDB.saveParticipant({ ...participants.find(p => p.id === activeMatch.participantBId)!, status: 'competing' });
+    
+    const pA = participants.find(p => p.id === activeMatch.participantAId);
+    const pB = participants.find(p => p.id === activeMatch.participantBId);
+    
+    if (pA) localDB.saveParticipant({ ...pA, status: 'competing' });
+    if (pB) localDB.saveParticipant({ ...pB, status: 'competing' });
+    
     localDB.updateSettings({ currentStatus: 'dueling' });
   };
 
@@ -117,8 +122,12 @@ export default function ConductorPage() {
     const loserId = winnerId === activeMatch.participantAId ? activeMatch.participantBId : activeMatch.participantAId;
     
     localDB.updateMatch(activeMatch.id, { winnerId, loserId, status: 'completed', completedAt: new Date().toISOString() });
-    localDB.saveParticipant({ ...participants.find(p => p.id === winnerId)!, status: 'advanced' });
-    localDB.saveParticipant({ ...participants.find(p => p.id === loserId)!, status: 'eliminated' });
+    
+    const winner = participants.find(p => p.id === winnerId);
+    const loser = participants.find(p => p.id === loserId);
+    
+    if (winner) localDB.saveParticipant({ ...winner, status: 'advanced' });
+    if (loser) localDB.saveParticipant({ ...loser, status: 'eliminated' });
     
     // Check finalists
     const remaining = participants.filter(p => (p.status === 'advanced' || p.status === 'available') && p.mode === 'participant' && p.id !== loserId);
@@ -127,7 +136,7 @@ export default function ConductorPage() {
       localDB.updateSettings({ currentStatus: 'finished' });
     }
 
-    toast({ title: "Ganador confirmado localmente" });
+    toast({ title: "Ganador confirmado" });
   };
 
   const handleNextMatch = () => {
@@ -161,7 +170,7 @@ export default function ConductorPage() {
             {settings?.eventName || 'Retos Graduados'}
           </h1>
           <p className="text-muted-foreground font-medium uppercase text-xs tracking-widest flex items-center gap-2">
-            Panel del Conductor (Modo Local) 
+            Panel del Conductor
             <Button variant="ghost" size="icon" className="h-4 w-4" onClick={() => window.location.reload()}><RefreshCw className="w-3 h-3"/></Button>
           </p>
         </div>
@@ -197,7 +206,7 @@ export default function ConductorPage() {
                 {!activeMatch ? (
                    <div className="text-center py-20 space-y-6">
                       <Shuffle className="w-20 h-20 opacity-10 mx-auto animate-pulse" />
-                      <p className="text-muted-foreground font-medium">No hay una ronda activa en este dispositivo.</p>
+                      <p className="text-muted-foreground font-medium">No hay una ronda activa en curso.</p>
                       <Button size="lg" onClick={handleSortRound} className="rounded-xl h-16 px-10 text-xl font-black shadow-lg">
                         Sortear Nueva Ronda
                       </Button>
