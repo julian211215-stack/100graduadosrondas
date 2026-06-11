@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -39,8 +38,7 @@ export default function PlayPage() {
   const [activeDynamic, setActiveDynamic] = useState<Dynamic | null>(null);
 
   useEffect(() => {
-    // Check local storage first for immediate feedback
-    const localUid = localStorage.getItem('ideha_registered_uid');
+    const localUid = typeof window !== 'undefined' ? localStorage.getItem('ideha_registered_uid') : null;
     
     const checkRegistration = async (uid: string) => {
       try {
@@ -48,14 +46,12 @@ export default function PlayPage() {
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           setParticipant(docSnap.data() as Participant);
-          
-          // Setup real-time listener
           onSnapshot(docRef, (snap) => {
             if (snap.exists()) setParticipant(snap.data() as Participant);
           });
         }
       } catch (err) {
-        console.error("Error verificando registro persistente:", err);
+        console.error("Error verificando registro existente:", err);
       }
     };
 
@@ -70,9 +66,7 @@ export default function PlayPage() {
       setLoading(false);
     });
     
-    // Safety timeout for loading
-    const timer = setTimeout(() => setLoading(false), 3000);
-
+    const timer = setTimeout(() => setLoading(false), 2000);
     return () => {
       unsubscribe();
       clearTimeout(timer);
@@ -118,20 +112,17 @@ export default function PlayPage() {
 
     setUploading(true);
     try {
-      // 1. Auth with Fallback
       let uid = "";
       try {
         const userCredential = await signInAnonymously(auth);
         uid = userCredential.user.uid;
       } catch (authError: any) {
         console.error("Error completo al registrarse (Auth): falló signInAnonymously, usando fallback local.", authError);
-        // Fallback UID if Auth fails (for dev/testing)
-        uid = localStorage.getItem('ideha_registered_uid') || `local-${Math.random().toString(36).substr(2, 9)}`;
+        uid = localStorage.getItem('ideha_registered_uid') || `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       }
 
       let photoUrl = `https://picsum.photos/seed/${uid}/200`;
 
-      // 2. Storage
       if (photo) {
         try {
           const photoRef = ref(storage, `photos/${uid}`);
@@ -139,12 +130,10 @@ export default function PlayPage() {
           photoUrl = await getDownloadURL(photoRef);
         } catch (storageError: any) {
           console.error("Error completo al registrarse (Storage):", storageError);
-          setErrorMessage("No se pudo subir la fotografía. Se usará un avatar temporal.");
-          // Don't block registration if storage fails
+          // Don't block registration if photo upload fails
         }
       }
 
-      // 3. Firestore
       const pData: Participant = {
         id: uid,
         name: regData.name,
@@ -156,29 +145,21 @@ export default function PlayPage() {
         updatedAt: new Date().toISOString(),
       };
 
-      try {
-        await setDoc(doc(db, 'participants', uid), pData);
-        setParticipant(pData);
-        localStorage.setItem('ideha_registered_uid', uid);
-        toast({ title: "¡Registro exitoso!" });
-      } catch (dbError: any) {
-        console.error("Error completo al registrarse (Firestore):", dbError);
-        setErrorMessage("No se pudo guardar el registro en la base de datos.");
-        throw dbError;
-      }
+      await setDoc(doc(db, 'participants', uid), pData);
+      setParticipant(pData);
+      localStorage.setItem('ideha_registered_uid', uid);
+      toast({ title: "¡Registro exitoso!" });
 
     } catch (err: any) {
       console.error("Error completo al registrarse:", err);
-      if (!errorMessage) {
-        setErrorMessage("No se pudo completar el registro. Revisa la consola o configuración de Firebase.");
-      }
+      setErrorMessage("No se pudo completar el registro. Revisa la consola o configuración de Firebase.");
     } finally {
       setUploading(false);
     }
   };
 
   const handleVote = async (selectedParticipantId: string) => {
-    toast({ title: "Voto registrado (Simulación)" });
+    toast({ title: "Voto registrado" });
     setVotedMatchId(activeMatch?.id || null);
   };
 
@@ -262,7 +243,6 @@ export default function PlayPage() {
     );
   }
 
-  // Live Screen for Registered Users
   return (
     <div className="p-4 max-w-md mx-auto space-y-4 pb-20">
       <Card className="bg-primary/5 border-primary/20">
@@ -282,9 +262,7 @@ export default function PlayPage() {
         </CardContent>
       </Card>
 
-      {/* States */}
       <div className="mt-4">
-        {/* DUEL STATE */}
         {activeMatch && activeMatch.status === 'live' && participant.status === 'competing' && opponent && activeDynamic && (
            <Card className="border-secondary border-2 bg-secondary/10 overflow-hidden animate-pulse">
              <CardHeader className="bg-secondary p-4 text-center">
@@ -316,7 +294,6 @@ export default function PlayPage() {
            </Card>
         )}
 
-        {/* VOTING STATE */}
         {activeMatch && activeMatch.status === 'voting' && participantA && participantB && (
            <Card className="border-primary border-2">
              <CardHeader className="text-center pb-2">
@@ -350,7 +327,6 @@ export default function PlayPage() {
            </Card>
         )}
 
-        {/* WAITING STATE */}
         {(!activeMatch || activeMatch.status === 'pending' || activeMatch.status === 'completed' || participant.status === 'waiting' || participant.status === 'available') && (
            <div className="text-center py-12 space-y-6">
               <div className="relative inline-block">

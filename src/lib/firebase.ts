@@ -1,22 +1,19 @@
-
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
-import { getAuth } from 'firebase/auth';
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || 'fake-api-key',
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || 'fake-auth-domain',
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'fake-project-id',
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || 'fake-storage-bucket',
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || 'fake-sender-id',
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || 'fake-app-id',
+  apiKey: "AIzaSyC1OH5zGCyyibYiCngt8TTWYqmYZnczCFI",
+  authDomain: "studio-161651395-a9ed9.firebaseapp.com",
+  projectId: "studio-161651395-a9ed9",
+  storageBucket: "studio-161651395-a9ed9.firebasestorage.app",
+  messagingSenderId: "239369169208",
+  appId: "1:239369169208:web:ec01008e9a93d56d89b9cd"
 };
 
-// Ensure Firebase is initialized only once
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const storage = getStorage(app);
-const auth = getAuth(app);
+export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-export { db, storage, auth };
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const storage = getStorage(app);
