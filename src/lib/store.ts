@@ -11,14 +11,22 @@ import {
   deleteDoc, 
   query, 
   where, 
-  getDoc,
-  writeBatch,
-  serverTimestamp
+  writeBatch
 } from 'firebase/firestore';
 import { AppSettings, Dynamic, Participant, Match, Vote } from './types';
 
-// Storage Keys for local identity
-const LOCAL_USER_KEY = 'retos_registered_user';
+// Helper to sanitize data for Firestore (remove undefined, replace with null)
+function sanitize(data: any) {
+  const clean: any = {};
+  Object.keys(data).forEach(key => {
+    if (data[key] === undefined) {
+      clean[key] = null;
+    } else if (data[key] !== undefined) {
+      clean[key] = data[key];
+    }
+  });
+  return clean;
+}
 
 export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -27,7 +35,16 @@ export function useAppSettings() {
     const docRef = doc(db, 'settings', 'config');
     const unsub = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        setSettings(docSnap.data() as AppSettings);
+        const data = docSnap.data();
+        // Safe merge with defaults to avoid breaking if extra fields exist
+        setSettings({
+          eventName: data.eventName || 'Retos Graduados IDEHA',
+          finalistsCount: data.finalistsCount || 2,
+          registrationOpen: !!data.registrationOpen,
+          currentStatus: data.currentStatus || 'idle',
+          currentRoundId: data.currentRoundId || "",
+          activeMatchId: data.activeMatchId || "",
+        } as AppSettings);
       } else {
         const initial: AppSettings = {
           eventName: 'Retos Graduados IDEHA',
@@ -35,7 +52,7 @@ export function useAppSettings() {
           registrationOpen: false,
           currentStatus: 'idle',
         };
-        setDoc(docRef, initial);
+        setDoc(docRef, initial).catch(e => console.error("Error creating settings:", e));
         setSettings(initial);
       }
     }, (error) => {
@@ -53,8 +70,24 @@ export function useDynamics() {
   useEffect(() => {
     const colRef = collection(db, 'dynamics');
     const unsub = onSnapshot(colRef, (snap) => {
-      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Dynamic));
+      const list = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        // Tolerant filtering: only keep docs that look like dynamics
+        .filter(d => d.name && typeof d.instructions === 'string')
+        .map(d => ({
+          id: d.id,
+          name: d.name,
+          instructions: d.instructions,
+          durationSeconds: d.durationSeconds || null,
+          votingCriteria: d.votingCriteria || "",
+          active: d.active !== false,
+          createdAt: d.createdAt || new Date().toISOString(),
+          updatedAt: d.updatedAt || new Date().toISOString(),
+        } as Dynamic));
+      
       setDynamics(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
+    }, (error) => {
+      console.error("Error listening to dynamics:", error);
     });
     return unsub;
   }, []);
@@ -68,8 +101,20 @@ export function useParticipants() {
   useEffect(() => {
     const colRef = collection(db, 'participants');
     const unsub = onSnapshot(colRef, (snap) => {
-      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Participant));
+      const list = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        // Filter out any non-participant data
+        .filter(p => p.name && p.generationId)
+        .map(p => ({
+          ...p,
+          status: p.status || 'waiting',
+          mode: p.mode || 'voter',
+          createdAt: p.createdAt || new Date().toISOString()
+        } as Participant));
+      
       setParticipants(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
+    }, (error) => {
+      console.error("Error listening to participants:", error);
     });
     return unsub;
   }, []);
@@ -86,6 +131,8 @@ export function useMatches(roundId?: string) {
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Match));
       setMatches(list);
+    }, (error) => {
+      console.error("Error listening to matches:", error);
     });
     return unsub;
   }, [roundId]);
@@ -108,6 +155,8 @@ export function useActiveMatch(matchId?: string) {
       } else {
         setMatch(null);
       }
+    }, (error) => {
+      console.error("Error listening to active match:", error);
     });
     return unsub;
   }, [matchId]);
@@ -128,6 +177,8 @@ export function useVotes(matchId?: string) {
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vote));
       setVotes(list);
+    }, (error) => {
+      console.error("Error listening to votes:", error);
     });
     return unsub;
   }, [matchId]);
@@ -138,56 +189,92 @@ export function useVotes(matchId?: string) {
 // Data Actions (Firestore)
 export const localDB = {
   updateSettings: async (updates: Partial<AppSettings>) => {
-    const docRef = doc(db, 'settings', 'config');
-    await updateDoc(docRef, updates);
+    try {
+      const docRef = doc(db, 'settings', 'config');
+      await updateDoc(docRef, sanitize(updates));
+    } catch (error: any) {
+      console.error("Error al guardar ajustes:", error);
+      throw error;
+    }
   },
   saveParticipant: async (p: Participant) => {
-    const docRef = doc(db, 'participants', p.id);
-    await setDoc(docRef, { ...p, updatedAt: new Date().toISOString() }, { merge: true });
+    try {
+      const docRef = doc(db, 'participants', p.id);
+      await setDoc(docRef, sanitize({ ...p, updatedAt: new Date().toISOString() }), { merge: true });
+    } catch (error: any) {
+      console.error("Error al guardar registro:", error);
+      throw error;
+    }
   },
   deleteParticipant: async (id: string) => {
-    await deleteDoc(doc(db, 'participants', id));
+    try {
+      await deleteDoc(doc(db, 'participants', id));
+    } catch (error: any) {
+      console.error("Error al eliminar registro:", error);
+      throw error;
+    }
   },
   saveDynamic: async (d: Dynamic) => {
-    const docRef = doc(db, 'dynamics', d.id);
-    await setDoc(docRef, { ...d, updatedAt: new Date().toISOString() }, { merge: true });
+    try {
+      const docRef = doc(db, 'dynamics', d.id);
+      await setDoc(docRef, sanitize({ ...d, updatedAt: new Date().toISOString() }), { merge: true });
+    } catch (error: any) {
+      console.error("Error al guardar dinámica:", error);
+      throw error;
+    }
   },
   deleteDynamic: async (id: string) => {
-    await deleteDoc(doc(db, 'dynamics', id));
+    try {
+      await deleteDoc(doc(db, 'dynamics', id));
+    } catch (error: any) {
+      console.error("Error al eliminar dinámica:", error);
+      throw error;
+    }
   },
   createRound: async (round: any, matches: Match[]) => {
-    const batch = writeBatch(db);
-    
-    // Save round
-    const roundRef = doc(db, 'rounds', round.id);
-    batch.set(roundRef, round);
-    
-    // Save matches
-    matches.forEach(m => {
-      const matchRef = doc(db, 'matches', m.id);
-      batch.set(matchRef, m);
-    });
-    
-    await batch.commit();
+    try {
+      const batch = writeBatch(db);
+      const roundRef = doc(db, 'rounds', round.id);
+      batch.set(roundRef, sanitize(round));
+      matches.forEach(m => {
+        const matchRef = doc(db, 'matches', m.id);
+        batch.set(matchRef, sanitize(m));
+      });
+      await batch.commit();
+    } catch (error: any) {
+      console.error("Error al crear ronda:", error);
+      throw error;
+    }
   },
   updateMatch: async (id: string, updates: Partial<Match>) => {
-    const docRef = doc(db, 'matches', id);
-    await updateDoc(docRef, updates);
+    try {
+      const docRef = doc(db, 'matches', id);
+      await updateDoc(docRef, sanitize(updates));
+    } catch (error: any) {
+      console.error("Error al actualizar duelo:", error);
+      throw error;
+    }
   },
   castVote: async (vote: Vote) => {
-    // Basic check for double voting could be done here or in rules
-    const docRef = doc(db, 'votes', `${vote.matchId}_${vote.voterId}`);
-    await setDoc(docRef, vote);
+    try {
+      const docRef = doc(db, 'votes', `${vote.matchId}_${vote.voterId}`);
+      await setDoc(docRef, sanitize(vote));
+    } catch (error: any) {
+      console.error("Error al votar:", error);
+      throw error;
+    }
   },
   resetAll: async () => {
-    // Caution: Destructive. For a prototype we reset settings and could clear collections if needed
-    // But usually just resetting settings status is enough to restart flow
-    await localDB.updateSettings({
-      currentStatus: 'idle',
-      registrationOpen: false,
-      currentRoundId: "",
-      activeMatchId: "",
-    });
-    // For a deep reset, you'd need to delete docs in collections, which Firestore batch handles up to 500
+    try {
+      await localDB.updateSettings({
+        currentStatus: 'idle',
+        registrationOpen: false,
+        currentRoundId: "",
+        activeMatchId: "",
+      });
+    } catch (error: any) {
+      console.error("Error al reiniciar evento:", error);
+      throw error;
+    }
   }
 };

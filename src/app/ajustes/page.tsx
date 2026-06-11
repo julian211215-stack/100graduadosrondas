@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from 'react';
@@ -7,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Edit2, Database, RefreshCw } from 'lucide-react';
+import { Trash2, Edit2, Database, RefreshCw, AlertCircle } from 'lucide-react';
 import { Dynamic } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -17,77 +16,89 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const [newDynamic, setNewDynamic] = useState<Partial<Dynamic>>({});
   const [isEditing, setIsEditing] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!settings) return;
-    localDB.updateSettings(settings);
-    toast({ title: "Ajustes guardados localmente" });
+    setIsSaving(true);
+    try {
+      await localDB.updateSettings(settings);
+      toast({ title: "Ajustes guardados" });
+    } catch (error: any) {
+      toast({ 
+        title: "Error al guardar ajustes", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleSaveDynamic = (e: React.FormEvent) => {
+  const handleSaveDynamic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDynamic.name || !newDynamic.instructions) {
       toast({ title: "Nombre e instrucciones son obligatorios", variant: "destructive" });
       return;
     }
 
-    const dynamicToSave: Dynamic = {
-      id: isEditing || crypto.randomUUID(),
-      name: newDynamic.name,
-      instructions: newDynamic.instructions,
-      durationSeconds: newDynamic.durationSeconds,
-      votingCriteria: newDynamic.votingCriteria,
-      active: true,
-      createdAt: newDynamic.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    localDB.saveDynamic(dynamicToSave);
-    setIsEditing(null);
-    setNewDynamic({});
-    toast({ title: "Dinámica guardada localmente" });
-  };
-
-  const handleDeleteDynamic = (id: string) => {
-    if (!confirm("¿Eliminar dinámica?")) return;
-    localDB.deleteDynamic(id);
-    toast({ title: "Dinámica eliminada" });
-  };
-
-  const handleClearEvent = () => {
-    if (!confirm("¿Seguro que quieres reiniciar TODO el evento en este navegador?")) return;
-    localDB.resetAll();
-    toast({ title: "Evento reiniciado completamente" });
-  };
-
-  const handleLoadDemo = () => {
-    const demoDynamics = [
-      { name: "La actuación más víctima", instructions: "Debes actuar una situación cotidiana exagerando el victimismo al máximo." },
-      { name: "Explica IDEHA en otro idioma", instructions: "Explica qué es IDEHA usando un idioma inventado o sonidos." },
-      { name: "El peor pretexto", instructions: "Da la excusa más creativa e increíble para llegar tarde a tu boda." },
-    ];
-
-    demoDynamics.forEach(d => {
-      localDB.saveDynamic({
-        id: crypto.randomUUID(),
-        ...d,
+    setIsSaving(true);
+    try {
+      const dynamicToSave: Dynamic = {
+        id: isEditing || crypto.randomUUID(),
+        name: newDynamic.name,
+        instructions: newDynamic.instructions,
+        durationSeconds: newDynamic.durationSeconds || null,
+        votingCriteria: newDynamic.votingCriteria || "",
         active: true,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-    });
+        createdAt: newDynamic.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
 
-    toast({ title: "Dinámicas demo cargadas" });
+      await localDB.saveDynamic(dynamicToSave);
+      setIsEditing(null);
+      setNewDynamic({});
+      toast({ title: "Dinámica guardada" });
+    } catch (error: any) {
+      toast({ 
+        title: "Error al guardar dinámica", 
+        description: error.message, 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteDynamic = async (id: string) => {
+    if (!confirm("¿Eliminar dinámica?")) return;
+    try {
+      await localDB.deleteDynamic(id);
+      toast({ title: "Dinámica eliminada" });
+    } catch (error: any) {
+      toast({ title: "Error al eliminar", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleClearEvent = async () => {
+    if (!confirm("¿Seguro que quieres reiniciar el evento?")) return;
+    try {
+      await localDB.resetAll();
+      toast({ title: "Evento reiniciado" });
+    } catch (error: any) {
+      toast({ title: "Error al reiniciar", description: error.message, variant: "destructive" });
+    }
   };
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8 pb-20">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento (Local)</h1>
+        <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleLoadDemo}><Database className="w-4 h-4 mr-2" /> Cargar Demo</Button>
-          <Button variant="destructive" onClick={handleClearEvent}><RefreshCw className="w-4 h-4 mr-2" /> Reiniciar</Button>
+          <Button variant="destructive" onClick={handleClearEvent} disabled={isSaving}>
+            <RefreshCw className="w-4 h-4 mr-2" /> Reiniciar
+          </Button>
         </div>
       </div>
 
@@ -96,7 +107,7 @@ export default function SettingsPage() {
           <CardTitle>Configuración General</CardTitle>
         </CardHeader>
         <CardContent>
-          {settings && (
+          {settings ? (
             <form onSubmit={handleSaveSettings} className="space-y-4">
               <div className="space-y-2">
                 <Label>Nombre del Evento</Label>
@@ -112,11 +123,15 @@ export default function SettingsPage() {
                   min="2" 
                   max="3" 
                   value={settings.finalistsCount} 
-                  onChange={e => localDB.updateSettings({ finalistsCount: parseInt(e.target.value) })} 
+                  onChange={e => localDB.updateSettings({ finalistsCount: parseInt(e.target.value) || 2 })} 
                 />
               </div>
-              <Button type="submit" className="w-full">Guardar Configuración</Button>
+              <Button type="submit" className="w-full" disabled={isSaving}>
+                {isSaving ? "Guardando..." : "Guardar Configuración"}
+              </Button>
             </form>
+          ) : (
+            <div className="p-4 text-center opacity-50">Cargando ajustes...</div>
           )}
         </CardContent>
       </Card>
@@ -133,15 +148,16 @@ export default function SettingsPage() {
                 value={newDynamic.name || ''} 
                 onChange={e => setNewDynamic({ ...newDynamic, name: e.target.value })} 
                 placeholder="Ej. La actuación más víctima"
+                required
               />
             </div>
             <div className="space-y-2">
-              <Label>Duración opcional (segundos)</Label>
+              <Label>Duración (segundos)</Label>
               <Input 
                 type="number"
-                value={newDynamic.durationSeconds || ''} 
-                onChange={e => setNewDynamic({ ...newDynamic, durationSeconds: parseInt(e.target.value) })} 
-                placeholder="60"
+                value={newDynamic.durationSeconds === null ? "" : newDynamic.durationSeconds} 
+                onChange={e => setNewDynamic({ ...newDynamic, durationSeconds: parseInt(e.target.value) || null })} 
+                placeholder="Sin tiempo"
               />
             </div>
             <div className="space-y-2 md:col-span-2">
@@ -150,10 +166,11 @@ export default function SettingsPage() {
                 value={newDynamic.instructions || ''} 
                 onChange={e => setNewDynamic({ ...newDynamic, instructions: e.target.value })} 
                 placeholder="Explica qué deben hacer los participantes..."
+                required
               />
             </div>
-            <Button type="submit" className="md:col-span-2">
-              {isEditing ? 'Actualizar' : 'Agregar'} Dinámica
+            <Button type="submit" className="md:col-span-2" disabled={isSaving}>
+              {isSaving ? "Guardando..." : (isEditing ? 'Actualizar' : 'Agregar') + " Dinámica"}
             </Button>
             {isEditing && (
               <Button type="button" variant="ghost" className="md:col-span-2" onClick={() => { setIsEditing(null); setNewDynamic({}); }}>
@@ -166,28 +183,35 @@ export default function SettingsPage() {
 
       <div className="space-y-4">
         <h2 className="text-xl font-headline font-semibold flex items-center gap-2">
-          <Database className="w-5 h-5" /> Lista de Dinámicas ({dynamics.length})
+          <Database className="w-5 h-5" /> Dinámicas Guardadas ({dynamics.length})
         </h2>
-        <div className="grid grid-cols-1 gap-4">
-          {dynamics.map(d => (
-            <Card key={d.id} className="overflow-hidden shadow-sm">
-              <div className="p-4 flex items-center justify-between">
-                <div className="space-y-1">
-                  <h3 className="font-bold text-lg text-primary">{d.name}</h3>
-                  <p className="text-sm opacity-80">{d.instructions}</p>
+        {dynamics.length === 0 ? (
+          <div className="text-center p-10 bg-muted/20 rounded-xl italic opacity-50">
+            No hay dinámicas creadas.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {dynamics.map(d => (
+              <Card key={d.id} className="overflow-hidden shadow-sm">
+                <div className="p-4 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-lg text-primary">{d.name}</h3>
+                    <p className="text-sm opacity-80">{d.instructions}</p>
+                    {d.durationSeconds && <p className="text-xs font-bold uppercase opacity-50">{d.durationSeconds} segundos</p>}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="icon" variant="ghost" onClick={() => { setIsEditing(d.id); setNewDynamic(d); }}>
+                      <Edit2 className="w-4 h-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="text-destructive" onClick={() => handleDeleteDynamic(d.id)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <Button size="icon" variant="ghost" onClick={() => { setIsEditing(d.id); setNewDynamic(d); }}>
-                    <Edit2 className="w-4 h-4" />
-                  </Button>
-                  <Button size="icon" variant="ghost" className="text-destructive" onClick={() => handleDeleteDynamic(d.id)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
