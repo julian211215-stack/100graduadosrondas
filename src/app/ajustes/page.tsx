@@ -45,10 +45,10 @@ export default function SettingsPage() {
         eventName: localSettings.eventName,
         finalistsCount: localSettings.finalistsCount
       });
-      toast({ title: "Ajustes guardados en la nube" });
+      toast({ title: "Configuración guardada en la nube" });
     } catch (error: any) {
       toast({ 
-        title: "Error al guardar ajustes", 
+        title: "Error al guardar configuración", 
         description: error.message, 
         variant: "destructive" 
       });
@@ -80,7 +80,7 @@ export default function SettingsPage() {
       await localDB.saveDynamic(dynamicToSave);
       setIsEditing(null);
       setNewDynamic({});
-      toast({ title: isEditing ? "Dinámica actualizada" : "Dinámica agregada" });
+      toast({ title: isEditing ? "Dinámica actualizada" : "Dinámica guardada" });
     } catch (error: any) {
       console.error("Error al guardar dinámica:", error);
       toast({ 
@@ -123,17 +123,17 @@ export default function SettingsPage() {
   };
 
   const handleDeleteDynamic = async (id: string) => {
-    if (!confirm("¿Eliminar esta dinámica de la base de datos?")) return;
+    if (!confirm("¿Eliminar esta dinámica de la base de datos en la nube?")) return;
     try {
       await localDB.deleteDynamic(id);
       toast({ title: "Dinámica eliminada" });
     } catch (error: any) {
-      toast({ title: "Error al eliminar", description: error.message, variant: "destructive" });
+      toast({ title: "Error al eliminar dinámica", description: error.message, variant: "destructive" });
     }
   };
 
   const handleClearEvent = async () => {
-    if (!confirm("¿Seguro que quieres reiniciar el estado del evento? Esto afectará a todos los dispositivos.")) return;
+    if (!confirm("¿Seguro que quieres reiniciar el estado del evento? Esto afectará a todos los dispositivos conectados en tiempo real.")) return;
     try {
       await localDB.resetAll();
       toast({ title: "Estado del evento reiniciado" });
@@ -147,7 +147,7 @@ export default function SettingsPage() {
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-headline font-bold text-primary">Ajustes del Evento</h1>
-          <p className="text-muted-foreground text-sm">Gestiona la configuración y las dinámicas en tiempo real.</p>
+          <p className="text-muted-foreground text-sm">Gestiona la configuración y las dinámicas en tiempo real en la nube.</p>
         </div>
         <div className="flex gap-2 w-full md:w-auto">
           <Button variant="outline" onClick={handleLoadDemo} disabled={isSaving} className="flex-1">
@@ -247,7 +247,7 @@ export default function SettingsPage() {
         {dynamics.length === 0 ? (
           <div className="text-center p-12 bg-muted/20 rounded-xl border-2 border-dashed border-muted">
             <AlertCircle className="w-10 h-10 mx-auto opacity-20 mb-2" />
-            <p className="opacity-50 italic">No hay dinámicas en la base de datos.</p>
+            <p className="opacity-50 italic">No hay dinámicas en la base de datos de la nube.</p>
             <Button variant="link" onClick={handleLoadDemo} className="mt-2">Cargar ejemplos ahora</Button>
           </div>
         ) : (

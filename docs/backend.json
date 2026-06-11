@@ -56,7 +56,7 @@
       "schema": "Dynamic",
       "description": "Stores challenge definitions."
     },
-    "/settings/config": {
+    "/settings/main": {
       "schema": "AppSettings",
       "description": "Global settings for the event."
     }

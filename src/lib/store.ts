@@ -36,7 +36,7 @@ export function useAppSettings() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    // We use settings/main as the single source of truth for event config
+    // Single source of truth in Firestore
     const docRef = doc(db, 'settings', 'main');
     const unsub = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -60,7 +60,7 @@ export function useAppSettings() {
         setSettings(initial);
       }
     }, (error) => {
-      console.error("Error listening to settings:", error);
+      console.error("Error al cargar configuración:", error);
     });
     return unsub;
   }, []);
@@ -76,7 +76,7 @@ export function useDynamics() {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as any))
-        // Filter out non-dynamic documents and handle legacy data
+        // Filter out documents without name or instructions to handle contamination
         .filter(d => d.name && d.instructions)
         .map(d => ({
           id: d.id,
@@ -89,10 +89,10 @@ export function useDynamics() {
           updatedAt: d.updatedAt || new Date().toISOString(),
         } as Dynamic));
       
-      // Client-side sort to avoid requiring composite indexes
+      // Client-side sort to avoid index requirements
       setDynamics(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
     }, (error) => {
-      console.error("Error listening to dynamics:", error);
+      console.error("Error al cargar dinámicas:", error);
     });
     return unsub;
   }, []);
@@ -118,7 +118,7 @@ export function useParticipants() {
       
       setParticipants(list.sort((a, b) => (a.createdAt > b.createdAt ? 1 : -1)));
     }, (error) => {
-      console.error("Error listening to participants:", error);
+      console.error("Error al cargar registros:", error);
     });
     return unsub;
   }, []);
@@ -136,7 +136,7 @@ export function useMatches(roundId?: string) {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Match));
       setMatches(list);
     }, (error) => {
-      console.error("Error listening to matches:", error);
+      console.error("Error al cargar duelos:", error);
     });
     return unsub;
   }, [roundId]);
@@ -160,7 +160,7 @@ export function useActiveMatch(matchId?: string) {
         setMatch(null);
       }
     }, (error) => {
-      console.error("Error listening to active match:", error);
+      console.error("Error al cargar duelo activo:", error);
     });
     return unsub;
   }, [matchId]);
@@ -182,7 +182,7 @@ export function useVotes(matchId?: string) {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vote));
       setVotes(list);
     }, (error) => {
-      console.error("Error listening to votes:", error);
+      console.error("Error al cargar votos:", error);
     });
     return unsub;
   }, [matchId]);
@@ -190,14 +190,14 @@ export function useVotes(matchId?: string) {
   return votes;
 }
 
-// Data Actions (Firestore)
+// Data Actions (Firestore Only)
 export const localDB = {
   updateSettings: async (updates: Partial<AppSettings>) => {
     try {
       const docRef = doc(db, 'settings', 'main');
       await setDoc(docRef, sanitize({ ...updates, updatedAt: new Date().toISOString() }), { merge: true });
     } catch (error: any) {
-      console.error("Error al guardar ajustes:", error);
+      console.error("Error al guardar configuración:", error);
       throw error;
     }
   },
@@ -276,6 +276,8 @@ export const localDB = {
         currentRoundId: "",
         activeMatchId: "",
       });
+      // Not deleting all dynamics or registrations automatically for safety,
+      // but the event state is cleared for all devices.
     } catch (error: any) {
       console.error("Error al reiniciar evento:", error);
       throw error;
