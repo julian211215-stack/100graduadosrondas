@@ -8,11 +8,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Camera, CheckCircle2, Trophy, Users, RefreshCw, AlertCircle } from 'lucide-react';
+import { Camera, CheckCircle2, Trophy, Users, RefreshCw, AlertCircle, LogOut } from 'lucide-react';
 import { Participant, Vote } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import { signInAnonymously } from 'firebase/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 export default function PlayPage() {
   const settings = useAppSettings();
@@ -34,32 +35,52 @@ export default function PlayPage() {
 
   const activeMatch = useActiveMatch(settings?.activeMatchId || undefined);
 
-  // Sync participant with Firestore and LocalStorage
+  // Sync participant with Firestore and validate existence
   useEffect(() => {
+    let localId = '';
     try {
       const localUserStr = localStorage.getItem('retos_registered_user');
       if (localUserStr) {
         const parsed = JSON.parse(localUserStr);
-        if (parsed && parsed.id) {
-          const exists = participants.find(p => p.id === parsed.id);
-          if (exists) {
-            setParticipant(exists);
-          } else {
-            // If exists in local but not in Firestore list yet, keep it from local
-            setParticipant(parsed);
-          }
-        }
+        localId = parsed?.id;
       }
-    } catch (err) {
-      console.error("Error parsing local user:", err);
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error("Error reading localStorage", e);
     }
-  }, [participants]);
 
-  // Derived Match Info with safety
+    if (!localId) {
+      setLoading(false);
+      setParticipant(null);
+      return;
+    }
+
+    // Subscribe to specific participant to detect deletion
+    const unsub = onSnapshot(doc(db, 'participants', localId), (snap) => {
+      if (snap.exists()) {
+        setParticipant({ id: snap.id, ...snap.data() } as Participant);
+        setLoading(false);
+      } else {
+        console.log("Participante ya no existe en Firestore, limpiando sesión local");
+        localStorage.removeItem('retos_registered_user');
+        setParticipant(null);
+        setLoading(false);
+        toast({ 
+          title: "Registro inactivo", 
+          description: "Tu registro fue eliminado. Regístrate de nuevo.",
+          variant: "destructive"
+        });
+      }
+    }, (err) => {
+      console.error("Error validando participante:", err);
+      setLoading(false);
+    });
+
+    return unsub;
+  }, [toast]);
+
+  // Derived Match Info with extreme safety
   const matchInfo = useMemo(() => {
-    if (!activeMatch || !participants.length) return null;
+    if (!activeMatch || !participants.length || !participant) return null;
     
     const pA = participants.find(p => p.id === activeMatch.participantAId);
     const pB = participants.find(p => p.id === activeMatch.participantBId);
@@ -69,10 +90,10 @@ export default function PlayPage() {
     let role: 'spectator' | 'competitor' = 'spectator';
     let opponent: Participant | null = null;
 
-    if (participant?.id === pA.id) {
+    if (participant.id === pA.id) {
       role = 'competitor';
       opponent = pB;
-    } else if (participant?.id === pB.id) {
+    } else if (participant.id === pB.id) {
       role = 'competitor';
       opponent = pA;
     }
@@ -156,7 +177,7 @@ export default function PlayPage() {
 
       await localDB.saveParticipant(pData);
       localStorage.setItem('retos_registered_user', JSON.stringify(pData));
-      setParticipant(pData);
+      // State will be updated by onSnapshot
       toast({ title: "¡Registrado con éxito!" });
     } catch (err: any) {
       console.error("Error al registrarse:", err);
@@ -181,6 +202,13 @@ export default function PlayPage() {
       toast({ title: "Voto enviado" });
     } catch (err) {
       console.error("Error al votar:", err);
+    }
+  };
+
+  const handleClearSession = () => {
+    if (confirm("¿Estás seguro de que quieres limpiar este registro de tu dispositivo? Esto te permitirá registrarte de nuevo.")) {
+      localStorage.removeItem('retos_registered_user');
+      setParticipant(null);
     }
   };
 
@@ -312,6 +340,9 @@ export default function PlayPage() {
                <button onClick={() => window.location.reload()} className="p-1 hover:bg-primary/20 rounded-full transition-colors">
                   <RefreshCw className="w-3 h-3 text-primary" />
                </button>
+               <button onClick={handleClearSession} className="p-1 hover:bg-destructive/20 rounded-full transition-colors ml-auto">
+                  <LogOut className="w-3 h-3 text-destructive" />
+               </button>
             </div>
           </div>
         </CardContent>
@@ -418,4 +449,3 @@ export default function PlayPage() {
     </div>
   );
 }
-

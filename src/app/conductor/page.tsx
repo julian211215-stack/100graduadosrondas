@@ -4,7 +4,7 @@
 import { useAppSettings, useParticipants, useDynamics, useMatches, useVotes, localDB } from '@/lib/store';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trophy, Users, Play, Radio, CheckCircle, ChevronRight, Shuffle, XCircle, RefreshCw, UserPlus, Settings2, Edit, Save } from 'lucide-react';
+import { Trophy, Users, Play, Radio, CheckCircle, ChevronRight, Shuffle, XCircle, RefreshCw, UserPlus, Settings2, Edit, Save, BarChart2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { Participant, Match } from '@/lib/types';
@@ -30,7 +30,7 @@ export default function ConductorPage() {
   const activeMatch = useMemo(() => matches.find(m => m.id === activeMatchId), [matches, activeMatchId]);
   const votes = useVotes(activeMatchId || undefined);
 
-  // All participants are eligible for manual duels in this version
+  // All participants are eligible for manual duels
   const allParticipants = useMemo(() => 
     participants.filter(p => p.mode === 'participant'), 
   [participants]);
@@ -172,7 +172,12 @@ export default function ConductorPage() {
     if (!activeMatch) return;
     const loserId = winnerId === activeMatch.participantAId ? activeMatch.participantBId : activeMatch.participantAId;
     
-    localDB.updateMatch(activeMatch.id, { winnerId, loserId, status: 'completed', completedAt: new Date().toISOString() });
+    localDB.updateMatch(activeMatch.id, { 
+      winnerId, 
+      loserId, 
+      status: 'completed', 
+      completedAt: new Date().toISOString() 
+    });
     
     const winner = participants.find(p => p.id === winnerId);
     const loser = participants.find(p => p.id === loserId);
@@ -180,7 +185,7 @@ export default function ConductorPage() {
     if (winner) localDB.saveParticipant({ ...winner, status: 'advanced' });
     if (loser) localDB.saveParticipant({ ...loser, status: 'eliminated' });
     
-    toast({ title: "Resultado guardado" });
+    toast({ title: "Ganador confirmado" });
   };
 
   const handleNextMatch = () => {
@@ -212,6 +217,15 @@ export default function ConductorPage() {
     return counts;
   }, [votes]);
 
+  const suggestedWinnerId = useMemo(() => {
+    if (!activeMatch) return null;
+    const vA = voteCounts[activeMatch.participantAId] || 0;
+    const vB = voteCounts[activeMatch.participantBId] || 0;
+    if (vA > vB) return activeMatch.participantAId;
+    if (vB > vA) return activeMatch.participantBId;
+    return null; // Tie
+  }, [voteCounts, activeMatch]);
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8 pb-32 scale-[0.92] origin-top">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -220,7 +234,7 @@ export default function ConductorPage() {
             {settings?.eventName || 'Retos Graduados'}
           </h1>
           <p className="text-muted-foreground font-medium uppercase text-[10px] tracking-[0.3em] flex items-center gap-2">
-            Panel del Conductor <Badge variant="outline" className="text-[9px] border-primary/20">Modo Manual</Badge>
+            Panel del Conductor <Badge variant="outline" className="text-[9px] border-primary/20">Manual & Real-time</Badge>
           </p>
         </div>
         <div className="flex gap-2">
@@ -275,9 +289,6 @@ export default function ConductorPage() {
                                <Badge variant="outline" className="text-[9px] mt-1">{participants.find(p => p.id === activeMatch.participantAId)?.label || 'Activo'}</Badge>
                                <div className="text-4xl font-black text-primary mt-2">{voteCounts[activeMatch.participantAId] || 0}</div>
                             </div>
-                            {activeMatch.status === 'completed' && !activeMatch.winnerId && (
-                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantAId)} className="w-full font-bold">Ganador</Button>
-                            )}
                          </div>
 
                          <div className="text-5xl font-black italic opacity-10">VS</div>
@@ -291,11 +302,43 @@ export default function ConductorPage() {
                                <Badge variant="outline" className="text-[9px] mt-1">{participants.find(p => p.id === activeMatch.participantBId)?.label || 'Activo'}</Badge>
                                <div className="text-4xl font-black text-primary mt-2">{voteCounts[activeMatch.participantBId] || 0}</div>
                             </div>
-                            {activeMatch.status === 'completed' && !activeMatch.winnerId && (
-                              <Button variant="secondary" onClick={() => handleConfirmWinner(activeMatch.participantBId)} className="w-full font-bold">Ganador</Button>
-                            )}
                          </div>
                       </div>
+
+                      {activeMatch.status === 'completed' && !activeMatch.winnerId && (
+                        <div className="bg-primary/5 p-4 rounded-xl border border-primary/20 space-y-4">
+                           <div className="flex items-center justify-center gap-2 text-primary font-black uppercase text-xs">
+                             <BarChart2 className="w-4 h-4" /> Ganador sugerido por votos
+                           </div>
+                           <div className="grid grid-cols-2 gap-4">
+                              <Button 
+                                variant={suggestedWinnerId === activeMatch.participantAId ? "default" : "outline"}
+                                onClick={() => handleConfirmWinner(activeMatch.participantAId)}
+                                className="h-16 rounded-xl font-bold flex flex-col"
+                              >
+                                <span>Participante A</span>
+                                <span className="text-[10px] opacity-60">
+                                  {voteCounts[activeMatch.participantAId] || 0} votos
+                                  {suggestedWinnerId === activeMatch.participantAId && " (Líder)"}
+                                </span>
+                              </Button>
+                              <Button 
+                                variant={suggestedWinnerId === activeMatch.participantBId ? "default" : "outline"}
+                                onClick={() => handleConfirmWinner(activeMatch.participantBId)}
+                                className="h-16 rounded-xl font-bold flex flex-col"
+                              >
+                                <span>Participante B</span>
+                                <span className="text-[10px] opacity-60">
+                                  {voteCounts[activeMatch.participantBId] || 0} votos
+                                  {suggestedWinnerId === activeMatch.participantBId && " (Líder)"}
+                                </span>
+                              </Button>
+                           </div>
+                           {suggestedWinnerId === null && (voteCounts[activeMatch.participantAId] > 0 || voteCounts[activeMatch.participantBId] > 0) && (
+                             <p className="text-[10px] text-center text-secondary font-bold uppercase">Empate Técnico - Decisión manual requerida</p>
+                           )}
+                        </div>
+                      )}
 
                       <div className="bg-muted/40 p-5 rounded-2xl text-center border-2 border-dashed border-primary/20">
                          <h4 className="font-black text-primary mb-1 text-lg uppercase">{dynamics.find(d => d.id === activeMatch.dynamicId)?.name}</h4>
@@ -372,7 +415,7 @@ export default function ConductorPage() {
            <Card className="shadow-xl border-none h-full max-h-[900px] flex flex-col overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/5">
                 <CardTitle className="text-base font-black uppercase">Participantes ({participants.length})</CardTitle>
-                <Button variant="ghost" size="icon" onClick={() => window.location.reload()}><RefreshCw className="w-4 h-4"/></Button>
+                <Button variant="ghost" size="icon" onClick={() => window.location.reload()} title="Forzar Recarga"><RefreshCw className="w-4 h-4"/></Button>
               </CardHeader>
               <CardContent className="p-0 overflow-auto flex-1">
                 <div className="divide-y">
