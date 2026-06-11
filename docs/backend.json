@@ -1,0 +1,64 @@
+
+{
+  "entities": {
+    "Participant": {
+      "title": "Participant",
+      "description": "User participating in the event as a competitor or voter.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "generationId": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "mode": { "type": "string", "enum": ["participant", "voter"] },
+        "status": { "type": "string", "enum": ["waiting", "available", "competing", "advanced", "eliminated", "finalist"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "generationId", "mode", "status"]
+    },
+    "Dynamic": {
+      "title": "Dynamic",
+      "description": "A challenge or activity for the participants.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "instructions": { "type": "string" },
+        "durationSeconds": { "type": "number" },
+        "votingCriteria": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global event configuration.",
+      "type": "object",
+      "properties": {
+        "eventName": { "type": "string" },
+        "finalistsCount": { "type": "number" },
+        "registrationOpen": { "type": "boolean" },
+        "currentStatus": { "type": "string" },
+        "activeMatchId": { "type": "string" },
+        "currentRoundId": { "type": "string" }
+      }
+    }
+  },
+  "auth": {
+    "providers": ["anonymous"]
+  },
+  "firestore": {
+    "/participants/{participantId}": {
+      "schema": "Participant",
+      "description": "Stores participant profiles."
+    },
+    "/dynamics/{dynamicId}": {
+      "schema": "Dynamic",
+      "description": "Stores challenge definitions."
+    },
+    "/settings/config": {
+      "schema": "AppSettings",
+      "description": "Global settings for the event."
+    }
+  }
+}
